@@ -4,11 +4,27 @@ import { useEffect, useRef, useState } from "react";
 import { toDBType } from "@/lib/requirement-type.map";
 import ExtractionReview from "./ExtractionReview";
 
-// Extend Window to handle webkit-prefixed SpeechRecognition
-declare global {
-  interface Window {
-    webkitSpeechRecognition: typeof SpeechRecognition;
-  }
+// Minimal interface for the Web Speech API (covers standard + webkit prefix)
+interface ISpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((event: ISpeechRecognitionEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: ((event: Event) => void) | null;
+}
+interface ISpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: { isFinal: boolean; 0: { transcript: string } }[];
+}
+type SpeechRecognitionCtor = new () => ISpeechRecognition;
+
+function getSpeechRecognition(): SpeechRecognitionCtor | undefined {
+  if (typeof window === "undefined") return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
 }
 
 const REQUIREMENT_TYPES = ["Restock", "New Label", "New Variety"] as const;
@@ -53,16 +69,13 @@ export default function RequirementForm({
   const [isRecording, setIsRecording] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [interimText, setInterimText] = useState("");
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<ISpeechRecognition | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Check speech recognition support client-side
   useEffect(() => {
-    const SR = typeof window !== "undefined"
-      ? (window.SpeechRecognition ?? window.webkitSpeechRecognition)
-      : undefined;
-    setSpeechSupported(!!SR);
+    setSpeechSupported(!!getSpeechRecognition());
   }, []);
 
   if (!isOpen) return null;
@@ -85,7 +98,7 @@ export default function RequirementForm({
 
   // ── Voice recording ────────────────────────────────────────
   function startRecording() {
-    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    const SR = getSpeechRecognition();
     if (!SR) return;
 
     const recognition = new SR();
@@ -93,7 +106,7 @@ export default function RequirementForm({
     recognition.interimResults = true;
     recognition.lang = "en-IN";
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: ISpeechRecognitionEvent) => {
       let interim = "";
       let final = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
