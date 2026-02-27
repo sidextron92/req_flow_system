@@ -1,8 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toDBType } from "@/lib/requirement-type.map";
 import ExtractionReview from "./ExtractionReview";
+
+// Extend Window to handle webkit-prefixed SpeechRecognition
+declare global {
+  interface Window {
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
 
 const REQUIREMENT_TYPES = ["Restock", "New Label", "New Variety"] as const;
 
@@ -42,7 +49,21 @@ export default function RequirementForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<ExtractionState | null>(null);
 
+  // ── Voice note state ───────────────────────────────────────
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check speech recognition support client-side
+  useEffect(() => {
+    const SR = typeof window !== "undefined"
+      ? (window.SpeechRecognition ?? window.webkitSpeechRecognition)
+      : undefined;
+    setSpeechSupported(!!SR);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -60,6 +81,56 @@ export default function RequirementForm({
 
   function removeImage(id: string) {
     setImages((prev) => prev.filter((img) => img.id !== id));
+  }
+
+  // ── Voice recording ────────────────────────────────────────
+  function startRecording() {
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!SR) return;
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-IN";
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = "";
+      let final = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += transcript;
+        } else {
+          interim += transcript;
+        }
+      }
+      if (final) {
+        setNotes((prev) => (prev ? `${prev} ${final}`.trim() : final.trim()));
+      }
+      setInterimText(interim);
+    };
+
+    recognition.onerror = () => {
+      setIsRecording(false);
+      setInterimText("");
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+      setInterimText("");
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+    setIsRecording(true);
+    setInterimText("");
+  }
+
+  function stopRecording() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setIsRecording(false);
+    setInterimText("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -117,6 +188,7 @@ export default function RequirementForm({
     setType("");
     setImages([]);
     setNotes("");
+    stopRecording();
     onClose();
   }
 
@@ -125,7 +197,7 @@ export default function RequirementForm({
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/40 z-20"
-        onClick={extraction ? undefined : onClose}   // lock backdrop while reviewing
+        onClick={extraction ? undefined : () => { stopRecording(); onClose(); }}
       />
 
       {/* Bottom Sheet */}
@@ -139,7 +211,7 @@ export default function RequirementForm({
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">New Requirement</h2>
           <button
-            onClick={onClose}
+            onClick={() => { stopRecording(); onClose(); }}
             className="text-gray-400 hover:text-gray-600 p-1 rounded-full"
             aria-label="Close"
             disabled={isSubmitting}
@@ -233,9 +305,45 @@ export default function RequirementForm({
 
           {/* Notes */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-semibold text-gray-700">
-              Notes
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-700">
+                Notes
+              </label>
+              {speechSupported && (
+                <button
+                  type="button"
+                  onClick={isRecording ? stopRecording : startRecording}
+                  disabled={isSubmitting}
+                  aria-label={isRecording ? "Stop recording" : "Record voice note"}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 ${
+                    isRecording
+                      ? "bg-red-100 text-red-600 hover:bg-red-200"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {isRecording ? (
+                    <>
+                      {/* Pulsing red dot */}
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600" />
+                      </span>
+                      Stop
+                    </>
+                  ) : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
+                        <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
+                      </svg>
+                      Voice
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -244,6 +352,18 @@ export default function RequirementForm({
               disabled={isSubmitting}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:opacity-60"
             />
+            {/* Interim transcript */}
+            {isRecording && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                <span className="relative flex h-2 w-2 mt-1 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600" />
+                </span>
+                <p className="text-xs text-red-700 leading-snug">
+                  {interimText || "Listening…"}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Error */}
