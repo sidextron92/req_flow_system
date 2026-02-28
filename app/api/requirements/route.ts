@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { toDBType } from "@/lib/requirement-type.map";
 import { runExtraction } from "@/lib/ai.service";
-import { transcribeAudio } from "@/lib/transcribe";
 
 const AUDIO_BUCKET = "reqflow_audio";
 
@@ -90,7 +89,6 @@ export async function POST(req: NextRequest) {
 
   // ── Upload voice note + transcribe ─────────────────────────
   const voiceNoteFile = formData.get("voiceNote") as File | null;
-  let voiceTranscript = "";
   let voiceStoragePath: string | null = null;
   let voicePublicUrl: string | null = null;
 
@@ -122,19 +120,7 @@ export async function POST(req: NextRequest) {
       storage_path: `audio:${voiceStoragePath}`,   // prefix so re-extract knows which bucket
     });
 
-    // Transcribe — non-fatal if it fails
-    try {
-      voiceTranscript = await transcribeAudio(buffer, voiceNoteFile.type);
-    } catch (err) {
-      console.error("Transcription failed:", err instanceof Error ? err.message : err);
-    }
   }
-
-  // Append transcript to notes so AI extraction sees it
-  const enrichedNotes = [
-    notes ?? "",
-    voiceTranscript ? `[Voice transcript]: ${voiceTranscript}` : "",
-  ].filter(Boolean).join("\n\n").trim();
 
   // ── Insert requirement ─────────────────────────────────────
   const { data: req_, error: reqError } = await supabaseAdmin
@@ -194,7 +180,7 @@ export async function POST(req: NextRequest) {
   try {
     const extraction = await runExtraction({
       requirementType: type,
-      notes: enrichedNotes,
+      notes: notes ?? "",
       images: imagePayloads,
     });
 

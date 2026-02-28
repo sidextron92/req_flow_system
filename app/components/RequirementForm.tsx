@@ -75,6 +75,7 @@ export default function RequirementForm({
   // ── Voice note state ────────────────────────────────────────
   const [voiceNote, setVoiceNote] = useState<VoiceNote | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [micSupported, setMicSupported] = useState(false);
 
@@ -140,13 +141,35 @@ export default function RequirementForm({
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const finalMime = recorder.mimeType || mimeType || "audio/webm";
         const blob = new Blob(chunksRef.current, { type: finalMime });
         const url = URL.createObjectURL(blob);
         setVoiceNote({ blob, url, mimeType: finalMime, durationSec: recordingSeconds });
         setIsRecording(false);
         cleanupStream();
+
+        // Transcribe and append to notes
+        setIsTranscribing(true);
+        try {
+          const ext = finalMime.includes("mp4") ? "mp4"
+            : finalMime.includes("ogg") ? "ogg"
+            : "webm";
+          const audioFile = new File([blob], `voice-note.${ext}`, { type: finalMime });
+          const fd = new FormData();
+          fd.append("audio", audioFile);
+          const res = await fetch("/api/transcribe", { method: "POST", body: fd });
+          const json = await res.json();
+          if (res.ok && json.transcript) {
+            setNotes((prev) =>
+              prev ? `${prev}\n\n${json.transcript}` : json.transcript
+            );
+          }
+        } catch {
+          // Transcription failure is non-fatal — user can still type notes manually
+        } finally {
+          setIsTranscribing(false);
+        }
       };
 
       recorder.start(250); // collect chunks every 250ms
@@ -443,9 +466,19 @@ export default function RequirementForm({
                     className="w-full h-8"
                     style={{ accentColor: "#7c3aed" }}
                   />
-                  <p className="text-xs text-purple-400">
-                    Not happy? Delete and record again.
-                  </p>
+                  {isTranscribing ? (
+                    <p className="text-xs text-purple-500 flex items-center gap-1.5">
+                      <svg className="animate-spin w-3 h-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      Transcribing…
+                    </p>
+                  ) : (
+                    <p className="text-xs text-purple-400">
+                      Not happy? Delete and record again.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
