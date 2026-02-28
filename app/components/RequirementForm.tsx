@@ -86,7 +86,7 @@ export default function RequirementForm({
 
   // Check mic support client-side
   useEffect(() => {
-    if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+    if (typeof window !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function") {
       setMicSupported(true);
     }
   }, []);
