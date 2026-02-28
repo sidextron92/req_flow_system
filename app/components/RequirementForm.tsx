@@ -4,29 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { toDBType } from "@/lib/requirement-type.map";
 import ExtractionReview from "./ExtractionReview";
 
-// Minimal interface for the Web Speech API (covers standard + webkit prefix)
-interface ISpeechRecognition extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  onresult: ((event: ISpeechRecognitionEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
-  onend: ((event: Event) => void) | null;
-}
-interface ISpeechRecognitionEvent extends Event {
-  resultIndex: number;
-  results: { isFinal: boolean; 0: { transcript: string } }[];
-}
-type SpeechRecognitionCtor = new () => ISpeechRecognition;
-
-function getSpeechRecognition(): SpeechRecognitionCtor | undefined {
-  if (typeof window === "undefined") return undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
-}
-
 const REQUIREMENT_TYPES = ["Restock", "New Label", "New Variety"] as const;
 
 interface RequirementFormProps {
@@ -43,6 +20,13 @@ interface UploadedImage {
   file: File;
 }
 
+interface VoiceNote {
+  blob: Blob;
+  url: string;      // object URL for local playback
+  mimeType: string;
+  durationSec: number;
+}
+
 interface ExtractionState {
   requirementId: string;
   requirementType: string;   // DB enum
@@ -50,6 +34,29 @@ interface ExtractionState {
   extractedData: Record<string, unknown> | null;
   modelUsed: string | null;
   aiError: string | null;
+}
+
+// Pick the best supported audio MIME type for MediaRecorder
+function getSupportedMimeType(): string {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+  ];
+  for (const type of candidates) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+  return "";
+}
+
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 export default function RequirementForm({
@@ -65,20 +72,43 @@ export default function RequirementForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<ExtractionState | null>(null);
 
-  // ── Voice note state ───────────────────────────────────────
+  // ── Voice note state ────────────────────────────────────────
+  const [voiceNote, setVoiceNote] = useState<VoiceNote | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
-  const [interimText, setInterimText] = useState("");
-  const recognitionRef = useRef<ISpeechRecognition | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [micSupported, setMicSupported] = useState(false);
 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Check speech recognition support client-side
+  // Check mic support client-side
   useEffect(() => {
-    setSpeechSupported(!!getSpeechRecognition());
+    if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+      setMicSupported(true);
+    }
+  }, []);
+
+  // Clean up object URLs and streams on unmount / close
+  useEffect(() => {
+    return () => {
+      cleanupStream();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!isOpen) return null;
+
+  function cleanupStream() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -96,57 +126,67 @@ export default function RequirementForm({
     setImages((prev) => prev.filter((img) => img.id !== id));
   }
 
-  // ── Voice recording ────────────────────────────────────────
-  function startRecording() {
-    const SR = getSpeechRecognition();
-    if (!SR) return;
+  // ── Voice recording ─────────────────────────────────────────
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-IN";
+      const mimeType = getSupportedMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
 
-    recognition.onresult = (event: ISpeechRecognitionEvent) => {
-      let interim = "";
-      let final = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          final += transcript;
-        } else {
-          interim += transcript;
-        }
-      }
-      if (final) {
-        setNotes((prev) => (prev ? `${prev} ${final}`.trim() : final.trim()));
-      }
-      setInterimText(interim);
-    };
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
 
-    recognition.onerror = () => {
-      setIsRecording(false);
-      setInterimText("");
-    };
+      recorder.onstop = () => {
+        const finalMime = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: finalMime });
+        const url = URL.createObjectURL(blob);
+        setVoiceNote({ blob, url, mimeType: finalMime, durationSec: recordingSeconds });
+        setIsRecording(false);
+        cleanupStream();
+      };
 
-    recognition.onend = () => {
-      setIsRecording(false);
-      setInterimText("");
-    };
+      recorder.start(250); // collect chunks every 250ms
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
 
-    recognition.start();
-    recognitionRef.current = recognition;
-    setIsRecording(true);
-    setInterimText("");
+      timerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } catch {
+      setSubmitError("Microphone access denied. Please allow mic permissions and try again.");
+    }
   }
 
   function stopRecording() {
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
-    setIsRecording(false);
-    setInterimText("");
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function deleteVoiceNote() {
+    if (voiceNote) URL.revokeObjectURL(voiceNote.url);
+    setVoiceNote(null);
+    setRecordingSeconds(0);
+  }
+
+  function resetAll() {
+    deleteVoiceNote();
+    stopRecording();
+    setType("");
+    setImages([]);
+    setNotes("");
+    setSubmitError(null);
+  }
+
+  async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     setIsSubmitting(true);
     setSubmitError(null);
@@ -154,11 +194,20 @@ export default function RequirementForm({
     try {
       const formData = new FormData();
       formData.append("userId", String(userId));
-      formData.append("type", type);           // UI value — route maps to DB enum
+      formData.append("type", type);
       formData.append("notes", notes);
 
       for (const img of images) {
         formData.append("images", img.file);
+      }
+
+      if (voiceNote) {
+        // Derive a sensible file extension from MIME type
+        const ext = voiceNote.mimeType.includes("mp4") ? "mp4"
+          : voiceNote.mimeType.includes("ogg") ? "ogg"
+          : "webm";
+        const voiceFile = new File([voiceNote.blob], `voice-note.${ext}`, { type: voiceNote.mimeType });
+        formData.append("voiceNote", voiceFile);
       }
 
       const res = await fetch("/api/requirements", {
@@ -175,11 +224,8 @@ export default function RequirementForm({
 
       const { id, extracted_data, model_used, storage_paths, ai_error } = json.data;
 
-      // Signal parent to refresh list
       onSubmitSuccess();
 
-      // Show ExtractionReview — keep form open underneath
-      // ai_error is passed so the modal can display it instead of the generic message
       setExtraction({
         requirementId:   id,
         requirementType: toDBType(type),
@@ -197,11 +243,7 @@ export default function RequirementForm({
 
   function handleExtractionClose() {
     setExtraction(null);
-    // Reset form
-    setType("");
-    setImages([]);
-    setNotes("");
-    stopRecording();
+    resetAll();
     onClose();
   }
 
@@ -237,6 +279,7 @@ export default function RequirementForm({
 
         {/* Scrollable form body */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-5 px-4 py-5 overflow-y-auto flex-1">
+
           {/* Requirement Type */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-semibold text-gray-700">
@@ -316,47 +359,103 @@ export default function RequirementForm({
             </button>
           </div>
 
-          {/* Notes */}
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
+          {/* Voice Note */}
+          {micSupported && (
+            <div className="flex flex-col gap-1.5">
               <label className="text-sm font-semibold text-gray-700">
-                Notes
+                Voice Note
               </label>
-              {speechSupported && (
+
+              {/* No recording in progress, no voice note saved yet */}
+              {!isRecording && !voiceNote && (
                 <button
                   type="button"
-                  onClick={isRecording ? stopRecording : startRecording}
+                  onClick={startRecording}
                   disabled={isSubmitting}
-                  aria-label={isRecording ? "Stop recording" : "Record voice note"}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 ${
-                    isRecording
-                      ? "bg-red-100 text-red-600 hover:bg-red-200"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
+                  className="flex items-center justify-center gap-2 w-full border-2 border-dashed border-gray-300 rounded-xl py-4 text-sm text-gray-500 hover:border-purple-400 hover:text-purple-500 transition-colors disabled:opacity-50"
                 >
-                  {isRecording ? (
-                    <>
-                      {/* Pulsing red dot */}
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600" />
-                      </span>
-                      Stop
-                    </>
-                  ) : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                        <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
-                        <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
-                      </svg>
-                      Voice
-                    </>
-                  )}
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
+                    <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
+                  </svg>
+                  Record Voice Note
                 </button>
               )}
+
+              {/* Recording in progress */}
+              {isRecording && (
+                <div className="flex items-center gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                  {/* Pulsing dot */}
+                  <span className="relative flex h-3 w-3 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600" />
+                  </span>
+                  <span className="text-sm text-red-700 font-medium flex-1">
+                    Recording… {formatDuration(recordingSeconds)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="4" y="4" width="16" height="16" rx="2" />
+                    </svg>
+                    Stop
+                  </button>
+                </div>
+              )}
+
+              {/* Recorded voice note — playback + delete */}
+              {voiceNote && !isRecording && (
+                <div className="bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-purple-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
+                      <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
+                    </svg>
+                    <span className="text-sm text-purple-700 font-medium flex-1">
+                      Voice note — {formatDuration(voiceNote.durationSec)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={deleteVoiceNote}
+                      disabled={isSubmitting}
+                      aria-label="Delete voice note"
+                      className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <polyline points="3 6 5 6 21 6" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 14H6L5 6" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6V4h6v2" />
+                      </svg>
+                    </button>
+                  </div>
+                  {/* Native audio player for playback */}
+                  <audio
+                    src={voiceNote.url}
+                    controls
+                    className="w-full h-8"
+                    style={{ accentColor: "#7c3aed" }}
+                  />
+                  <p className="text-xs text-purple-400">
+                    Not happy? Delete and record again.
+                  </p>
+                </div>
+              )}
             </div>
+          )}
+
+          {/* Notes */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-semibold text-gray-700">
+              Notes
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -365,18 +464,6 @@ export default function RequirementForm({
               disabled={isSubmitting}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:opacity-60"
             />
-            {/* Interim transcript */}
-            {isRecording && (
-              <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-                <span className="relative flex h-2 w-2 mt-1 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600" />
-                </span>
-                <p className="text-xs text-red-700 leading-snug">
-                  {interimText || "Listening…"}
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Error */}

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { toDBType } from "@/lib/requirement-type.map";
 import { runExtraction } from "@/lib/ai.service";
+import { transcribeAudio } from "@/lib/transcribe";
+
+const AUDIO_BUCKET = "reqflow_audio";
 
 // GET /api/requirements?userId=123
 export async function GET(req: NextRequest) {
@@ -85,6 +88,54 @@ export async function POST(req: NextRequest) {
     imagePayloads.push({ base64: buffer.toString("base64"), mimeType: file.type });
   }
 
+  // ── Upload voice note + transcribe ─────────────────────────
+  const voiceNoteFile = formData.get("voiceNote") as File | null;
+  let voiceTranscript = "";
+  let voiceStoragePath: string | null = null;
+  let voicePublicUrl: string | null = null;
+
+  if (voiceNoteFile && voiceNoteFile.size > 0) {
+    const ext = voiceNoteFile.name.split(".").pop() ?? "webm";
+    voiceStoragePath = `${userId}/voice/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+    const arrayBuffer = await voiceNoteFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const { error: voiceUploadError } = await supabaseAdmin.storage
+      .from(AUDIO_BUCKET)
+      .upload(voiceStoragePath, buffer, { contentType: voiceNoteFile.type, upsert: false });
+
+    if (voiceUploadError) {
+      return NextResponse.json({ error: `Voice note upload failed: ${voiceUploadError.message}` }, { status: 500 });
+    }
+
+    const { data: voiceUrlData } = supabaseAdmin.storage
+      .from(AUDIO_BUCKET)
+      .getPublicUrl(voiceStoragePath);
+
+    voicePublicUrl = voiceUrlData.publicUrl;
+
+    // Add to attachments so it's visible alongside images
+    attachments.push({
+      url: voicePublicUrl,
+      file_name: voiceNoteFile.name,
+      storage_path: `audio:${voiceStoragePath}`,   // prefix so re-extract knows which bucket
+    });
+
+    // Transcribe — non-fatal if it fails
+    try {
+      voiceTranscript = await transcribeAudio(buffer, voiceNoteFile.type);
+    } catch (err) {
+      console.error("Transcription failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Append transcript to notes so AI extraction sees it
+  const enrichedNotes = [
+    notes ?? "",
+    voiceTranscript ? `[Voice transcript]: ${voiceTranscript}` : "",
+  ].filter(Boolean).join("\n\n").trim();
+
   // ── Insert requirement ─────────────────────────────────────
   const { data: req_, error: reqError } = await supabaseAdmin
     .from("requirements")
@@ -143,7 +194,7 @@ export async function POST(req: NextRequest) {
   try {
     const extraction = await runExtraction({
       requirementType: type,
-      notes: notes ?? "",
+      notes: enrichedNotes,
       images: imagePayloads,
     });
 
@@ -170,6 +221,7 @@ export async function POST(req: NextRequest) {
         model_used:     modelUsed,
         ai_error:       aiError,
         // Pass back storage paths so UI can send them for re-extraction
+        // Image paths are plain strings; voice path is prefixed with "audio:"
         storage_paths:  attachments.map((a) => a.storage_path),
       },
     },
