@@ -83,6 +83,7 @@ export default function RequirementForm({
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const recordingSecondsRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Check mic support client-side
@@ -141,44 +142,50 @@ export default function RequirementForm({
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.onstop = async () => {
+      recorder.onstop = () => {
         const finalMime = recorder.mimeType || mimeType || "audio/webm";
+        // All chunks are now guaranteed flushed — requestData() was called before stop()
         const blob = new Blob(chunksRef.current, { type: finalMime });
         const url = URL.createObjectURL(blob);
-        setVoiceNote({ blob, url, mimeType: finalMime, durationSec: recordingSeconds });
+        const duration = recordingSecondsRef.current;
+        setVoiceNote({ blob, url, mimeType: finalMime, durationSec: duration });
         setIsRecording(false);
         cleanupStream();
 
         // Transcribe and append to notes
         setIsTranscribing(true);
-        try {
-          const ext = finalMime.includes("mp4") ? "mp4"
-            : finalMime.includes("ogg") ? "ogg"
-            : "webm";
-          const audioFile = new File([blob], `voice-note.${ext}`, { type: finalMime });
-          const fd = new FormData();
-          fd.append("audio", audioFile);
-          const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-          const json = await res.json();
-          if (res.ok && json.transcript) {
-            setNotes((prev) =>
-              prev ? `${prev}\n\n${json.transcript}` : json.transcript
-            );
-          }
-        } catch {
-          // Transcription failure is non-fatal — user can still type notes manually
-        } finally {
-          setIsTranscribing(false);
-        }
+        const ext = finalMime.includes("mp4") ? "mp4"
+          : finalMime.includes("ogg") ? "ogg"
+          : "webm";
+        const audioFile = new File([blob], `voice-note.${ext}`, { type: finalMime });
+        const fd = new FormData();
+        fd.append("audio", audioFile);
+        fetch("/api/transcribe", { method: "POST", body: fd })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.transcript) {
+              setNotes((prev) =>
+                prev ? `${prev}\n\n${json.transcript}` : json.transcript
+              );
+            }
+          })
+          .catch(() => {
+            // Transcription failure is non-fatal — user can still type notes manually
+          })
+          .finally(() => setIsTranscribing(false));
       };
 
-      recorder.start(250); // collect chunks every 250ms
+      recorder.start(); // no timeslice — all data flushed in one chunk on stop
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       setRecordingSeconds(0);
+      recordingSecondsRef.current = 0;
 
       timerRef.current = setInterval(() => {
-        setRecordingSeconds((s) => s + 1);
+        setRecordingSeconds((s) => {
+          recordingSecondsRef.current = s + 1;
+          return s + 1;
+        });
       }, 1000);
     } catch {
       setSubmitError("Microphone access denied. Please allow mic permissions and try again.");
