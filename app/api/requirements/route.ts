@@ -3,6 +3,8 @@ import { supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { toDBType } from "@/lib/requirement-type.map";
 import { runExtraction } from "@/lib/ai.service";
 
+const AUDIO_BUCKET = "reqflow_audio";
+
 // GET /api/requirements?userId=123
 export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get("userId");
@@ -83,6 +85,41 @@ export async function POST(req: NextRequest) {
 
     attachments.push({ url: urlData.publicUrl, file_name: file.name, storage_path: storagePath });
     imagePayloads.push({ base64: buffer.toString("base64"), mimeType: file.type });
+  }
+
+  // ── Upload voice note + transcribe ─────────────────────────
+  const voiceNoteFile = formData.get("voiceNote") as File | null;
+  let voiceStoragePath: string | null = null;
+  let voicePublicUrl: string | null = null;
+
+  if (voiceNoteFile && voiceNoteFile.size > 0) {
+    const ext = voiceNoteFile.name.split(".").pop() ?? "webm";
+    voiceStoragePath = `${userId}/voice/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+    const arrayBuffer = await voiceNoteFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const { error: voiceUploadError } = await supabaseAdmin.storage
+      .from(AUDIO_BUCKET)
+      .upload(voiceStoragePath, buffer, { contentType: voiceNoteFile.type, upsert: false });
+
+    if (voiceUploadError) {
+      return NextResponse.json({ error: `Voice note upload failed: ${voiceUploadError.message}` }, { status: 500 });
+    }
+
+    const { data: voiceUrlData } = supabaseAdmin.storage
+      .from(AUDIO_BUCKET)
+      .getPublicUrl(voiceStoragePath);
+
+    voicePublicUrl = voiceUrlData.publicUrl;
+
+    // Add to attachments so it's visible alongside images
+    attachments.push({
+      url: voicePublicUrl,
+      file_name: voiceNoteFile.name,
+      storage_path: `audio:${voiceStoragePath}`,   // prefix so re-extract knows which bucket
+    });
+
   }
 
   // ── Insert requirement ─────────────────────────────────────
@@ -170,6 +207,7 @@ export async function POST(req: NextRequest) {
         model_used:     modelUsed,
         ai_error:       aiError,
         // Pass back storage paths so UI can send them for re-extraction
+        // Image paths are plain strings; voice path is prefixed with "audio:"
         storage_paths:  attachments.map((a) => a.storage_path),
       },
     },
