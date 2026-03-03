@@ -20,7 +20,22 @@ type ChatMessage =
   | { role: "assistant"; text: string }
   | { role: "user"; text: string };
 
-type ViewState = "extraction" | "chat" | "success";
+type ViewState = "extraction" | "chat" | "fuzzy-match" | "success";
+
+// ── Fuzzy match types ──────────────────────────────────────────
+interface LabelSuggestion { brand_name: string; brand_id: string }
+interface ProductSuggestion { product_name: string; product_id: string }
+
+interface FuzzyMatchState {
+  labelQuery: string | null;
+  labelExact: LabelSuggestion | null;
+  labelSuggestions: LabelSuggestion[];
+  products: Array<{
+    original: string;
+    exact: ProductSuggestion | null;
+    suggestions: ProductSuggestion[];
+  }>;
+}
 
 export default function ExtractionReview({
   requirementId,
@@ -52,6 +67,15 @@ export default function ExtractionReview({
   const [isFilling, setIsFilling]           = useState(false);
   const [fillError, setFillError]           = useState<string | null>(null);
   const [pendingValidation, setPendingValidation] = useState<ValidationResult | null>(null);
+
+  // ── Fuzzy match state ──────────────────────────────────────
+  const [fuzzyState, setFuzzyState]           = useState<FuzzyMatchState | null>(null);
+  const [selectedLabel, setSelectedLabel]     = useState<{ name: string; id: string } | null>(null);
+  const [selectedProducts, setSelectedProducts] = useState<Record<string, { name: string; id: string }>>({});
+  const [isFuzzyChecking, setIsFuzzyChecking] = useState(false);
+  const [fuzzyError, setFuzzyError]           = useState<string | null>(null);
+  // Extraction snapshot to save after fuzzy confirm
+  const pendingExtractionRef = useRef<Record<string, unknown> | null>(null);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +130,7 @@ export default function ExtractionReview({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label_name:     finalExtraction.label_name    ?? null,
+          label_id:       finalExtraction.label_id      ?? null,
           category_name:  finalExtraction.category_name ?? null,
           expiry_date:    finalExtraction.expiry_date   ?? null,
           qty_required:   finalExtraction.qty_required  ?? null,
@@ -132,6 +157,147 @@ export default function ExtractionReview({
     }
   }
 
+  // ── Fuzzy match helpers ────────────────────────────────────
+  function buildMergedExtraction(
+    base: Record<string, unknown>,
+    selLabel: { name: string; id: string } | null,
+    selProducts: Record<string, { name: string; id: string }>
+  ): Record<string, unknown> {
+    const merged = { ...base };
+    if (selLabel) {
+      merged.label_name = selLabel.name;
+      merged.label_id   = selLabel.id;
+    }
+    if (Array.isArray(merged.products)) {
+      merged.products = (merged.products as Record<string, unknown>[]).map((p) => {
+        const origName = String(p.product_name ?? "");
+        const sel = selProducts[origName];
+        if (sel) return { ...p, product_name: sel.name, product_id: sel.id };
+        return p;
+      });
+    }
+    return merged;
+  }
+
+  async function runFuzzyMatchCheck(finalExtraction: Record<string, unknown>) {
+    setIsFuzzyChecking(true);
+    setFuzzyError(null);
+
+    const label_name =
+      typeof finalExtraction.label_name === "string" && finalExtraction.label_name.trim()
+        ? finalExtraction.label_name.trim()
+        : undefined;
+
+    const product_names: string[] = Array.isArray(finalExtraction.products)
+      ? (finalExtraction.products as Record<string, unknown>[])
+          .map((p) => String(p.product_name ?? "").trim())
+          .filter(Boolean)
+      : [];
+
+    // For NEW_VARIETY there's no label_name — only check products
+    if (!label_name && product_names.length === 0) {
+      setIsFuzzyChecking(false);
+      const ok = await saveRequirement(finalExtraction);
+      if (ok) { setView("success"); onSaved(); }
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/brand-product/fuzzy-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label_name, product_names }),
+      });
+      const json = await res.json();
+
+      if (!res.ok) {
+        // Fuzzy check failed — save as-is rather than blocking the user
+        setIsFuzzyChecking(false);
+        const ok = await saveRequirement(finalExtraction);
+        if (ok) { setView("success"); onSaved(); }
+        return;
+      }
+
+      // Check if anything needs user input
+      const labelNeedsInput =
+        json.label && !json.label.exact && json.label.suggestions.length > 0;
+      const productsNeedInput =
+        (json.products as ProductResult[]).some(
+          (p: ProductResult) => !p.exact && p.suggestions.length > 0
+        );
+
+      if (!labelNeedsInput && !productsNeedInput) {
+        // All exact or no suggestions — auto-apply exact matches and save
+        const autoLabel = json.label?.exact
+          ? { name: json.label.exact.brand_name, id: json.label.exact.brand_id }
+          : null;
+        const autoProducts: Record<string, { name: string; id: string }> = {};
+        for (const p of (json.products as ProductResult[])) {
+          if (p.exact) {
+            autoProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id };
+          }
+        }
+        const merged = buildMergedExtraction(finalExtraction, autoLabel, autoProducts);
+        setIsFuzzyChecking(false);
+        const ok = await saveRequirement(merged);
+        if (ok) { setView("success"); onSaved(); }
+        return;
+      }
+
+      // Pre-select exact matches where found
+      const preLabel = json.label?.exact
+        ? { name: json.label.exact.brand_name, id: json.label.exact.brand_id }
+        : null;
+      const preProducts: Record<string, { name: string; id: string }> = {};
+      for (const p of (json.products as ProductResult[])) {
+        if (p.exact) {
+          preProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id };
+        }
+      }
+
+      pendingExtractionRef.current = finalExtraction;
+      setFuzzyState({
+        labelQuery: label_name ?? null,
+        labelExact: json.label?.exact ?? null,
+        labelSuggestions: json.label?.suggestions ?? [],
+        products: json.products,
+      });
+      setSelectedLabel(preLabel);
+      setSelectedProducts(preProducts);
+      setIsFuzzyChecking(false);
+      setView("fuzzy-match");
+    } catch {
+      setIsFuzzyChecking(false);
+      // Network error — save as-is
+      const ok = await saveRequirement(finalExtraction);
+      if (ok) { setView("success"); onSaved(); }
+    }
+  }
+
+  interface ProductResult {
+    original: string;
+    exact: ProductSuggestion | null;
+    suggestions: ProductSuggestion[];
+  }
+
+  async function handleFuzzyConfirm() {
+    if (!pendingExtractionRef.current) return;
+    const merged = buildMergedExtraction(
+      pendingExtractionRef.current,
+      selectedLabel,
+      selectedProducts
+    );
+    setExtraction(merged);
+    const ok = await saveRequirement(merged);
+    if (ok) { setView("success"); onSaved(); }
+  }
+
+  async function handleFuzzySkip() {
+    if (!pendingExtractionRef.current) return;
+    const ok = await saveRequirement(pendingExtractionRef.current);
+    if (ok) { setView("success"); onSaved(); }
+  }
+
   // ── Done button clicked ────────────────────────────────────
   async function handleDone() {
     if (!extraction) return;
@@ -139,11 +305,7 @@ export default function ExtractionReview({
     const validation = validateExtraction(extraction, requirementType);
 
     if (validation.valid) {
-      const ok = await saveRequirement(extraction);
-      if (ok) {
-        onSaved();
-        onClose();
-      }
+      await runFuzzyMatchCheck(extraction);
       return;
     }
 
@@ -192,20 +354,11 @@ export default function ExtractionReview({
       if (newValidation.valid) {
         setChatMessages((prev) => [
           ...prev,
-          { role: "assistant", text: "Got it! All details are now complete. Saving your requirement..." },
+          { role: "assistant", text: "Got it! All details are now complete. Checking against catalog..." },
         ]);
         setIsFilling(false);
 
-        const ok = await saveRequirement(updated);
-        if (ok) {
-          setView("success");
-          onSaved();
-        } else {
-          setChatMessages((prev) => [
-            ...prev,
-            { role: "assistant", text: "There was an error saving. Please try again." },
-          ]);
-        }
+        await runFuzzyMatchCheck(updated);
       } else {
         setChatMessages((prev) => [
           ...prev,
@@ -348,6 +501,177 @@ export default function ExtractionReview({
               Close
             </button>
           </div>
+        )}
+
+        {/* ── FUZZY MATCH VIEW ──────────────────────────────────── */}
+        {view === "fuzzy-match" && fuzzyState && (
+          <>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Confirm Details</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Select the closest match or keep as typed</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-5 px-4 py-4 overflow-y-auto flex-1">
+
+              {/* Label / Brand section */}
+              {fuzzyState.labelQuery && fuzzyState.labelSuggestions.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Brand Name
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    You entered: <span className="font-medium text-gray-700">{fuzzyState.labelQuery}</span>
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {fuzzyState.labelSuggestions.map((s) => {
+                      const isSelected = selectedLabel?.name === s.brand_name && selectedLabel?.id === s.brand_id;
+                      return (
+                        <button
+                          key={`${s.brand_name}::${s.brand_id}`}
+                          onClick={() =>
+                            setSelectedLabel(
+                              isSelected ? null : { name: s.brand_name, id: s.brand_id }
+                            )
+                          }
+                          className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                            isSelected
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100"
+                          }`}
+                        >
+                          {s.brand_name}
+                        </button>
+                      );
+                    })}
+                    {/* User's original input pill */}
+                    {(() => {
+                      const isSelected =
+                        selectedLabel?.name === fuzzyState.labelQuery &&
+                        selectedLabel?.id === "";
+                      return (
+                        <button
+                          onClick={() =>
+                            setSelectedLabel(
+                              isSelected ? null : { name: fuzzyState.labelQuery!, id: "" }
+                            )
+                          }
+                          className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                            isSelected
+                              ? "bg-gray-700 border-gray-700 text-white"
+                              : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                          }`}
+                        >
+                          {fuzzyState.labelQuery} (as typed)
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Products sections */}
+              {fuzzyState.products
+                .filter((p) => !p.exact && p.suggestions.length > 0)
+                .map((p) => {
+                  const sel = selectedProducts[p.original];
+                  return (
+                    <div key={p.original} className="flex flex-col gap-2">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        Product
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        You entered: <span className="font-medium text-gray-700">{p.original}</span>
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {p.suggestions.map((s) => {
+                          const isSelected =
+                            sel?.name === s.product_name && sel?.id === s.product_id;
+                          return (
+                            <button
+                              key={`${s.product_name}::${s.product_id}`}
+                              onClick={() => {
+                                setSelectedProducts((prev) => {
+                                  if (isSelected) {
+                                    const next = { ...prev };
+                                    delete next[p.original];
+                                    return next;
+                                  }
+                                  return { ...prev, [p.original]: { name: s.product_name, id: s.product_id } };
+                                });
+                              }}
+                              className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                                isSelected
+                                  ? "bg-blue-600 border-blue-600 text-white"
+                                  : "bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100"
+                              }`}
+                            >
+                              {s.product_name}
+                            </button>
+                          );
+                        })}
+                        {/* User's original input pill */}
+                        {(() => {
+                          const isSelected = sel?.name === p.original && sel?.id === "";
+                          return (
+                            <button
+                              onClick={() => {
+                                setSelectedProducts((prev) => {
+                                  if (isSelected) {
+                                    const next = { ...prev };
+                                    delete next[p.original];
+                                    return next;
+                                  }
+                                  return { ...prev, [p.original]: { name: p.original, id: "" } };
+                                });
+                              }}
+                              className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                                isSelected
+                                  ? "bg-gray-700 border-gray-700 text-white"
+                                  : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                              }`}
+                            >
+                              {p.original} (as typed)
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {saveError && (
+                <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                  <p className="text-xs text-red-600">{saveError}</p>
+                </div>
+              )}
+              {fuzzyError && (
+                <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                  <p className="text-xs text-red-600">{fuzzyError}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 px-4 py-4 border-t border-gray-100 flex-shrink-0">
+              <button
+                type="button"
+                onClick={handleFuzzySkip}
+                disabled={isSaving}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
+              >
+                Save as typed
+              </button>
+              <button
+                type="button"
+                onClick={handleFuzzyConfirm}
+                disabled={isSaving}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
+              >
+                {isSaving ? "Saving..." : "Confirm & Save"}
+              </button>
+            </div>
+          </>
         )}
 
         {/* ── CHAT VIEW ─────────────────────────────────────────── */}
@@ -522,10 +846,10 @@ export default function ExtractionReview({
               <button
                 type="button"
                 onClick={handleDone}
-                disabled={!extraction || isSaving || isRerunning}
+                disabled={!extraction || isSaving || isRerunning || isFuzzyChecking}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
               >
-                {isSaving ? "Saving..." : "Done"}
+                {isFuzzyChecking ? "Checking..." : isSaving ? "Saving..." : "Done"}
               </button>
             </div>
           </>

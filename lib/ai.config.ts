@@ -78,7 +78,8 @@ Rules:
 - If multiple products are visible, list them all in the products array.
 - For product_name: the value MUST follow the format "BrandName NumericCode" (e.g. "ASIAN 010", "Campus 2345", "Bata 1234"). Both parts — a recognisable brand name AND a numeric code — must be clearly visible or stated. If either part is missing or ambiguous, set product_name to null.
 - For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-- Match category_name exactly to one of the categories listed above if possible.`;
+- Match category_name exactly to one of the categories listed above if possible.
+- Do NOT output label_id or product_id fields. These are system-assigned IDs that will be looked up separately — never infer or generate them.`;
 }
 
 // ── NEW LABEL ─────────────────────────────────────────────────
@@ -104,7 +105,6 @@ Your task is to extract as much information as possible and return it as a JSON 
   "products": [                       // One primary/representative product for this label (max 1 for NEW_LABEL)
     {
       "product_name": string,         // Clear product name
-      "product_id": string | null,    // Barcode / SKU if readable
       "notes": string | null          // Any notes: pricing, target segment, launch quantity suggested
     }
   ],
@@ -125,7 +125,8 @@ Rules:
 - For NEW_LABEL, the products array should contain at most one representative product.
 - For qty_required: extract any quantity mentioned (e.g. "50 pieces", "2 dozen", "ek sau jodi") and normalise to a short string like "50 pairs". Include the unit if stated. If no quantity is mentioned, set to null.
 - For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-- Match category_name exactly to one of the categories listed above if possible.`;
+- Match category_name exactly to one of the categories listed above if possible.
+- Do NOT output label_id or product_id fields. These are system-assigned IDs that will be looked up separately — never infer or generate them.`;
 }
 
 // ── NEW VARIETY ───────────────────────────────────────────────
@@ -151,7 +152,6 @@ Your task is to extract as much information as possible and return it as a JSON 
   "products": [                       // The new variety/variants to be added (can be multiple if several variants shown)
     {
       "product_name": string,         // Product name including the distinguishing variant detail (e.g. "Nike Air Max - Red, Size 9")
-      "product_id": string | null,    // Barcode / SKU if readable
       "notes": string | null          // Variant-specific notes: exact size, colour, material, quantity requested
     }
   ],
@@ -172,7 +172,8 @@ Rules:
 - In product_name, always include the variant differentiator (colour, size, style) so it is unambiguous.
 - For qty_required: extract any quantity mentioned (e.g. "50 pieces", "2 dozen", "ek sau jodi") and normalise to a short string like "50 pairs". Include the unit if stated. If no quantity is mentioned, set to null.
 - For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-- Match category_name exactly to one of the categories listed above if possible.`;
+- Match category_name exactly to one of the categories listed above if possible.
+- Do NOT output label_id or product_id fields. These are system-assigned IDs that will be looked up separately — never infer or generate them.`;
 }
 
 // ── Builder map — keyed by DB enum value ─────────────────────

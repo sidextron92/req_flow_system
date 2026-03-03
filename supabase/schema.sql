@@ -195,3 +195,79 @@ CREATE TRIGGER requirements_updated_at
 
 -- Add qty_required field (mandatory for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
+
+
+-- ============================================================
+-- BRAND PRODUCT DATA
+-- Master catalog for fuzzy-matching label and product names
+-- before saving requirements. Upload data via CSV import.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS brand_product_data (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_name   TEXT NOT NULL,
+  brand_id     TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  product_id   TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Drop old btree indexes (replaced by GiST below)
+DROP INDEX IF EXISTS idx_brand_product_brand_name;
+DROP INDEX IF EXISTS idx_brand_product_product_name;
+
+-- Enable trigram extension (run once; safe to re-run)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- GiST trigram indexes for fast similarity search
+CREATE INDEX IF NOT EXISTS idx_brand_trgm   ON brand_product_data USING gist (brand_name   gist_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_product_trgm ON brand_product_data USING gist (product_name gist_trgm_ops);
+
+
+-- ============================================================
+-- FUZZY SEARCH RPC FUNCTIONS
+-- Called from /api/brand-product/fuzzy-search via supabase.rpc()
+-- ============================================================
+
+-- Returns distinct brands closest to the query string.
+-- Deduplication: DISTINCT ON (lower(brand_name)) so each unique
+-- brand name appears only once regardless of how many products it has.
+CREATE OR REPLACE FUNCTION fuzzy_search_brands(query TEXT, result_limit INT DEFAULT 5)
+RETURNS TABLE (brand_name TEXT, brand_id TEXT, score REAL)
+LANGUAGE sql STABLE
+AS $$
+  -- Subquery: pick the highest-scoring row per distinct brand name,
+  -- then re-order the deduplicated results by score DESC.
+  SELECT b.brand_name, b.brand_id, b.score
+  FROM (
+    SELECT DISTINCT ON (lower(b2.brand_name))
+      b2.brand_name,
+      b2.brand_id,
+      similarity(b2.brand_name, query) AS score
+    FROM brand_product_data b2
+    WHERE similarity(b2.brand_name, query) > 0.15
+    ORDER BY lower(b2.brand_name), similarity(b2.brand_name, query) DESC
+  ) b
+  ORDER BY b.score DESC
+  LIMIT result_limit;
+$$;
+
+-- Returns distinct products closest to the query string.
+-- DISTINCT ON (lower(product_name)) deduplicates product name variants.
+CREATE OR REPLACE FUNCTION fuzzy_search_products(query TEXT, result_limit INT DEFAULT 5)
+RETURNS TABLE (product_name TEXT, product_id TEXT, score REAL)
+LANGUAGE sql STABLE
+AS $$
+  SELECT p.product_name, p.product_id, p.score
+  FROM (
+    SELECT DISTINCT ON (lower(p2.product_name))
+      p2.product_name,
+      p2.product_id,
+      similarity(p2.product_name, query) AS score
+    FROM brand_product_data p2
+    WHERE similarity(p2.product_name, query) > 0.15
+    ORDER BY lower(p2.product_name), similarity(p2.product_name, query) DESC
+  ) p
+  ORDER BY p.score DESC
+  LIMIT result_limit;
+$$;

@@ -42,6 +42,7 @@ interface Product {
 
 interface PatchBody {
   label_name?: string | null;
+  label_id?: string | null;
   category_name?: string | null;
   expiry_date?: string | null;
   qty_required?: string | null;
@@ -64,11 +65,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { label_name, category_name, expiry_date, qty_required, remarks, products, extracted_data, model_used } = body;
+  const { label_name, label_id, category_name, expiry_date, qty_required, remarks, products, extracted_data, model_used } = body;
 
   // ── 1. Update requirements row ─────────────────────────────
   const updatePayload: Record<string, unknown> = { status: "OPEN" };
   if (label_name    !== undefined) updatePayload.label_name    = label_name    || null;
+  if (label_id      !== undefined) updatePayload.label_id      = label_id      || null;
   if (category_name !== undefined) updatePayload.category_name = category_name || null;
   if (expiry_date   !== undefined) updatePayload.expiry_date   = expiry_date   || null;
   if (qty_required  !== undefined) updatePayload.qty_required  = qty_required  || null;
