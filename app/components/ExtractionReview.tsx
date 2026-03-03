@@ -74,6 +74,11 @@ export default function ExtractionReview({
   const [selectedProducts, setSelectedProducts] = useState<Record<string, { name: string; id: string }>>({});
   const [isFuzzyChecking, setIsFuzzyChecking] = useState(false);
   const [fuzzyError, setFuzzyError]           = useState<string | null>(null);
+  // Editable "as typed" text for brand and products
+  const [editingLabel, setEditingLabel]               = useState(false);
+  const [editedLabelText, setEditedLabelText]         = useState("");
+  const [editingProducts, setEditingProducts]         = useState<Record<string, boolean>>({});
+  const [editedProductTexts, setEditedProductTexts]   = useState<Record<string, string>>({});
   // Extraction snapshot to save after fuzzy confirm
   const pendingExtractionRef = useRef<Record<string, unknown> | null>(null);
 
@@ -264,6 +269,10 @@ export default function ExtractionReview({
       });
       setSelectedLabel(preLabel);
       setSelectedProducts(preProducts);
+      setEditingLabel(false);
+      setEditedLabelText("");
+      setEditingProducts({});
+      setEditedProductTexts({});
       setIsFuzzyChecking(false);
       setView("fuzzy-match");
     } catch {
@@ -545,26 +554,76 @@ export default function ExtractionReview({
                         </button>
                       );
                     })}
-                    {/* User's original input pill */}
+                    {/* User's original input – editable pill */}
                     {(() => {
+                      const displayText = editedLabelText || fuzzyState.labelQuery!;
                       const isSelected =
-                        selectedLabel?.name === fuzzyState.labelQuery &&
+                        selectedLabel?.name === displayText &&
                         selectedLabel?.id === "";
+
+                      if (editingLabel) {
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              value={editedLabelText || fuzzyState.labelQuery!}
+                              onChange={(e) => setEditedLabelText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const val = (editedLabelText || fuzzyState.labelQuery!).trim();
+                                  if (val) {
+                                    setSelectedLabel({ name: val, id: "" });
+                                    setEditingLabel(false);
+                                  }
+                                }
+                              }}
+                              className="text-sm px-3 py-1.5 rounded-full border border-gray-400 bg-white text-gray-900 font-medium outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-400 w-48"
+                            />
+                            <button
+                              onClick={() => {
+                                const val = (editedLabelText || fuzzyState.labelQuery!).trim();
+                                if (val) {
+                                  setSelectedLabel({ name: val, id: "" });
+                                  setEditingLabel(false);
+                                }
+                              }}
+                              className="text-xs px-2 py-1 rounded-full bg-gray-700 text-white font-medium"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        );
+                      }
+
                       return (
-                        <button
-                          onClick={() =>
-                            setSelectedLabel(
-                              isSelected ? null : { name: fuzzyState.labelQuery!, id: "" }
-                            )
-                          }
-                          className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                            isSelected
-                              ? "bg-gray-700 border-gray-700 text-white"
-                              : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
-                          }`}
-                        >
-                          {fuzzyState.labelQuery} (as typed)
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() =>
+                              setSelectedLabel(
+                                isSelected ? null : { name: displayText, id: "" }
+                              )
+                            }
+                            className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                              isSelected
+                                ? "bg-gray-700 border-gray-700 text-white"
+                                : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            {displayText} (as typed)
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (!editedLabelText) setEditedLabelText(fuzzyState.labelQuery!);
+                              setEditingLabel(true);
+                            }}
+                            className="text-gray-400 hover:text-gray-600 p-1"
+                            title="Edit"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                              <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+                            </svg>
+                          </button>
+                        </div>
                       );
                     })()}
                   </div>
@@ -611,29 +670,92 @@ export default function ExtractionReview({
                             </button>
                           );
                         })}
-                        {/* User's original input pill */}
+                        {/* User's original input – editable pill */}
                         {(() => {
-                          const isSelected = sel?.name === p.original && sel?.id === "";
-                          return (
-                            <button
-                              onClick={() => {
-                                setSelectedProducts((prev) => {
-                                  if (isSelected) {
-                                    const next = { ...prev };
-                                    delete next[p.original];
-                                    return next;
+                          const displayText = editedProductTexts[p.original] || p.original;
+                          const isSelected = sel?.name === displayText && sel?.id === "";
+                          const isEditing = editingProducts[p.original];
+
+                          if (isEditing) {
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  autoFocus
+                                  value={editedProductTexts[p.original] || p.original}
+                                  onChange={(e) =>
+                                    setEditedProductTexts((prev) => ({
+                                      ...prev,
+                                      [p.original]: e.target.value,
+                                    }))
                                   }
-                                  return { ...prev, [p.original]: { name: p.original, id: "" } };
-                                });
-                              }}
-                              className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                                isSelected
-                                  ? "bg-gray-700 border-gray-700 text-white"
-                                  : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
-                              }`}
-                            >
-                              {p.original} (as typed)
-                            </button>
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      const val = (editedProductTexts[p.original] || p.original).trim();
+                                      if (val) {
+                                        setSelectedProducts((prev) => ({
+                                          ...prev,
+                                          [p.original]: { name: val, id: "" },
+                                        }));
+                                        setEditingProducts((prev) => ({ ...prev, [p.original]: false }));
+                                      }
+                                    }
+                                  }}
+                                  className="text-sm px-3 py-1.5 rounded-full border border-gray-400 bg-white text-gray-900 font-medium outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-400 w-48"
+                                />
+                                <button
+                                  onClick={() => {
+                                    const val = (editedProductTexts[p.original] || p.original).trim();
+                                    if (val) {
+                                      setSelectedProducts((prev) => ({
+                                        ...prev,
+                                        [p.original]: { name: val, id: "" },
+                                      }));
+                                      setEditingProducts((prev) => ({ ...prev, [p.original]: false }));
+                                    }
+                                  }}
+                                  className="text-xs px-2 py-1 rounded-full bg-gray-700 text-white font-medium"
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setSelectedProducts((prev) => {
+                                    if (isSelected) {
+                                      const next = { ...prev };
+                                      delete next[p.original];
+                                      return next;
+                                    }
+                                    return { ...prev, [p.original]: { name: displayText, id: "" } };
+                                  });
+                                }}
+                                className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                                  isSelected
+                                    ? "bg-gray-700 border-gray-700 text-white"
+                                    : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
+                                }`}
+                              >
+                                {displayText} (as typed)
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (!editedProductTexts[p.original])
+                                    setEditedProductTexts((prev) => ({ ...prev, [p.original]: p.original }));
+                                  setEditingProducts((prev) => ({ ...prev, [p.original]: true }));
+                                }}
+                                className="text-gray-400 hover:text-gray-600 p-1"
+                                title="Edit"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                                  <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+                                </svg>
+                              </button>
+                            </div>
                           );
                         })()}
                       </div>
