@@ -658,7 +658,8 @@ function DetailContent() {
   }
 
   const title    = req.label_name ?? req.category_name ?? "Untitled";
-  const backUrl  = `/?userId=${userId}`;
+  const tabParam = searchParams.get("tab");
+  const backUrl  = `/?userId=${userId}${tabParam ? `&tab=${tabParam}` : ""}`;
   const comments = flattenComments(req.comment_log);
 
   // Red dot: last comment is from someone other than the current user

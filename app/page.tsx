@@ -23,6 +23,13 @@ interface Requirement {
   requirement_products: RequirementProduct[];
 }
 
+interface AssignedRequirement extends Requirement {
+  created_by_name: string | null;
+  created_by_darkstore: string | null;
+}
+
+type TabId = "byMe" | "forMe";
+
 const STATUS_COLORS: Record<string, string> = {
   DRAFT:                 "bg-gray-100 text-gray-600",
   OPEN:                  "bg-blue-100 text-blue-700",
@@ -49,6 +56,8 @@ const ALL_STATUSES = [
   "DRAFT", "OPEN", "IN_PROCESS",
   "REVIEW_FOR_COMPLETION", "COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE",
 ];
+
+const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED"]);
 
 type SortOption = "deadline_asc" | "created_desc";
 
@@ -98,7 +107,6 @@ function DaysLeftBadge({ expiry }: { expiry: string | null }) {
 // ─── Requirement Card ─────────────────────────────────────────────────────────
 
 function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => void }) {
-  // Qty hint — look for a "qty" or numeric pattern in notes of any product
   const qtyNote = req.requirement_products
     .map((p) => p.notes)
     .filter(Boolean)
@@ -143,6 +151,128 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
         </p>
       )}
     </li>
+  );
+}
+
+// ─── Assigned Requirement Card ────────────────────────────────────────────────
+
+function AssignedRequirementCard({
+  req,
+  onClick,
+}: {
+  req: AssignedRequirement;
+  onClick: () => void;
+}) {
+  const qtyNote = req.requirement_products
+    .map((p) => p.notes)
+    .filter(Boolean)
+    .join(" · ");
+
+  const title = req.label_name ?? req.category_name ?? "—";
+  const creatorLine = [req.created_by_name, req.created_by_darkstore]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <li
+      onClick={onClick}
+      className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col gap-2.5 cursor-pointer active:scale-[0.98] transition-transform"
+    >
+      {/* Row 1: Type + Created date */}
+      <div className="flex items-center justify-between">
+        <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-blue-500"}`}>
+          {TYPE_LABELS[req.type] ?? req.type}
+        </span>
+        <span className="text-xs text-gray-400">{formatDate(req.created_at)}</span>
+      </div>
+
+      {/* Row 2: Title */}
+      <p className="text-base font-semibold text-gray-900 leading-snug">{title}</p>
+
+      {/* Row 3: Status + Days left */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+            STATUS_COLORS[req.status] ?? "bg-gray-100 text-gray-600"
+          }`}
+        >
+          {req.status.replace(/_/g, " ")}
+        </span>
+        <DaysLeftBadge expiry={req.expiry_date} />
+      </div>
+
+      {/* Row 4: Creator name + darkstore */}
+      {creatorLine && (
+        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24"
+               stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+          <span className="truncate">{creatorLine}</span>
+        </div>
+      )}
+
+      {/* Row 5: Remarks / Qty (only if present) */}
+      {(req.remarks || qtyNote) && (
+        <p className="text-xs text-gray-500 leading-snug line-clamp-2">
+          {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      )}
+    </li>
+  );
+}
+
+// ─── Tab Bar ──────────────────────────────────────────────────────────────────
+
+function TabBar({
+  activeTab,
+  byMeCount,
+  forMeCount,
+  onSwitch,
+}: {
+  activeTab: TabId;
+  byMeCount: number;
+  forMeCount: number;
+  onSwitch: (tab: TabId) => void;
+}) {
+  const tabs: { id: TabId; label: string; count: number }[] = [
+    { id: "byMe",   label: "Requirements by me", count: byMeCount },
+    { id: "forMe",  label: "Req for me",          count: forMeCount },
+  ];
+
+  return (
+    <div className="flex gap-1 bg-gray-100 rounded-2xl p-1">
+      {tabs.map(({ id, label, count }) => {
+        const isActive = activeTab === id;
+        return (
+          <button
+            key={id}
+            onClick={() => onSwitch(id)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold transition-colors ${
+              isActive
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {label}
+            {count > 0 && (
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
+                  isActive
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-300 text-gray-600"
+                }`}
+              >
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -211,48 +341,98 @@ function HomeContent() {
   const router = useRouter();
   const userId = Number(searchParams.get("userId") ?? 0);
 
-  const [requirements, setRequirements] = useState<Requirement[]>([]);
-  const [loading, setLoading]           = useState(false);
-  const [formOpen, setFormOpen]         = useState(false);
-  const [activeStatus, setActiveStatus] = useState<string | null>(null);
-  const [sort, setSort]                 = useState<SortOption>("created_desc");
+  // Defer all search-param-dependent rendering to after mount to prevent hydration mismatch.
+  // The server has no access to URL params; the client does — so we show the skeleton until mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
-  const fetchRequirements = useCallback(async () => {
+  const [requirements, setRequirements]             = useState<Requirement[]>([]);
+  const [loading, setLoading]                       = useState(false);
+  const [assignedRequirements, setAssignedReqs]     = useState<AssignedRequirement[]>([]);
+  const [assignedLoading, setAssignedLoading]       = useState(false);
+  const [userRole, setUserRole]                     = useState<string | null>(null);
+  const [formOpen, setFormOpen]                     = useState(false);
+  const [activeStatus, setActiveStatus]             = useState<string | null>(null);
+  const [sort, setSort]                             = useState<SortOption>("created_desc");
+
+  // Derive active tab from URL param + role (not a state var — avoids double-render)
+  const tabParam = searchParams.get("tab") as TabId | null;
+  const defaultTab: TabId = userRole === "bijnisTrader" ? "byMe" : "forMe";
+  const activeTab: TabId  = (tabParam === "byMe" || tabParam === "forMe") ? tabParam : defaultTab;
+
+  const fetchAllData = useCallback(async () => {
     if (!userId) return;
+
     setLoading(true);
-    try {
-      const res = await fetch(`/api/requirements?userId=${userId}`);
-      const json = await res.json();
+    setAssignedLoading(true);
+
+    const [reqResult, assignedResult, userResult] = await Promise.allSettled([
+      fetch(`/api/requirements?userId=${userId}`),
+      fetch(`/api/requirements/assigned?userId=${userId}`),
+      fetch(`/api/user?userId=${userId}`),
+    ]);
+
+    if (reqResult.status === "fulfilled" && reqResult.value.ok) {
+      const json = await reqResult.value.json();
       setRequirements(json.data ?? []);
-    } finally {
-      setLoading(false);
+    }
+    setLoading(false);
+
+    if (assignedResult.status === "fulfilled" && assignedResult.value.ok) {
+      const json = await assignedResult.value.json();
+      setAssignedReqs(json.data ?? []);
+    }
+    setAssignedLoading(false);
+
+    if (userResult.status === "fulfilled" && userResult.value.ok) {
+      const json = await userResult.value.json();
+      setUserRole(json.data?.role ?? null);
     }
   }, [userId]);
 
-  useEffect(() => { fetchRequirements(); }, [fetchRequirements]);
+  useEffect(() => { fetchAllData(); }, [fetchAllData]);
+
+  function switchTab(tab: TabId) {
+    setActiveStatus(null);
+    setSort("created_desc");
+    router.replace(`/?userId=${userId}&tab=${tab}`);
+  }
+
+  // Badge counts — exclude DRAFT and COMPLETED
+  const byMeBadgeCount = useMemo(
+    () => requirements.filter((r) => !EXCLUDED_FOR_COUNT.has(r.status)).length,
+    [requirements]
+  );
+  // assignedRequirements already excludes DRAFT/COMPLETED at the API level
+  const forMeBadgeCount = assignedRequirements.length;
 
   const displayedRequirements = useMemo(() => {
+    const source: Requirement[] =
+      activeTab === "byMe" ? requirements : (assignedRequirements as Requirement[]);
+
     let list = activeStatus
-      ? requirements.filter((r) => r.status === activeStatus)
-      : requirements;
+      ? source.filter((r) => r.status === activeStatus)
+      : source;
 
     if (sort === "deadline_asc") {
       list = [...list].sort((a, b) => {
-        // No expiry → sort to end
         if (!a.expiry_date && !b.expiry_date) return 0;
         if (!a.expiry_date) return 1;
         if (!b.expiry_date) return -1;
         return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
       });
     } else {
-      // "created_desc" — already returned newest first from API, just preserve
       list = [...list].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
     }
 
     return list;
-  }, [requirements, activeStatus, sort]);
+  }, [requirements, assignedRequirements, activeTab, activeStatus, sort]);
+
+  const isActiveTabLoading = activeTab === "byMe" ? loading : assignedLoading;
+
+  if (!mounted) return <HomeSkeleton />;
 
   return (
     <>
@@ -282,6 +462,13 @@ function HomeContent() {
               My Requirements
             </h2>
 
+            <TabBar
+              activeTab={activeTab}
+              byMeCount={byMeBadgeCount}
+              forMeCount={forMeBadgeCount}
+              onSwitch={switchTab}
+            />
+
             <FilterBar
               activeStatus={activeStatus}
               sort={sort}
@@ -289,7 +476,7 @@ function HomeContent() {
               onSortChange={setSort}
             />
 
-            {loading ? (
+            {isActiveTabLoading ? (
               <div className="flex flex-col gap-3 mt-1">
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="bg-white rounded-2xl border border-gray-200 p-4 h-24 animate-pulse" />
@@ -297,19 +484,35 @@ function HomeContent() {
               </div>
             ) : displayedRequirements.length === 0 ? (
               <div className="text-center text-gray-400 py-16 text-sm">
-                {requirements.length === 0
-                  ? "No requirements yet. Create your first one!"
-                  : "No requirements match this filter."}
+                {activeTab === "byMe"
+                  ? (requirements.length === 0
+                      ? "No requirements yet. Create your first one!"
+                      : "No requirements match this filter.")
+                  : (assignedRequirements.length === 0
+                      ? "No requirements assigned to you."
+                      : "No requirements match this filter.")}
               </div>
             ) : (
               <ul className="flex flex-col gap-3">
-                {displayedRequirements.map((req) => (
-                  <RequirementCard
-                    key={req.id}
-                    req={req}
-                    onClick={() => router.push(`/requirements/${req.id}?userId=${userId}`)}
-                  />
-                ))}
+                {displayedRequirements.map((req) =>
+                  activeTab === "byMe" ? (
+                    <RequirementCard
+                      key={req.id}
+                      req={req}
+                      onClick={() =>
+                        router.push(`/requirements/${req.id}?userId=${userId}&tab=${activeTab}`)
+                      }
+                    />
+                  ) : (
+                    <AssignedRequirementCard
+                      key={req.id}
+                      req={req as AssignedRequirement}
+                      onClick={() =>
+                        router.push(`/requirements/${req.id}?userId=${userId}&tab=${activeTab}`)
+                      }
+                    />
+                  )
+                )}
               </ul>
             )}
           </section>
@@ -320,7 +523,7 @@ function HomeContent() {
         isOpen={formOpen}
         userId={userId}
         onClose={() => setFormOpen(false)}
-        onSubmitSuccess={fetchRequirements}
+        onSubmitSuccess={fetchAllData}
       />
     </>
   );
@@ -336,6 +539,11 @@ function HomeSkeleton() {
         <div className="h-14 w-full bg-blue-200 rounded-2xl animate-pulse" />
         <div className="flex flex-col gap-3">
           <div className="h-4 w-36 bg-gray-200 rounded animate-pulse" />
+          {/* Tab bar skeleton */}
+          <div className="flex gap-1 bg-gray-100 rounded-2xl p-1">
+            <div className="flex-1 h-9 rounded-xl bg-gray-200 animate-pulse" />
+            <div className="flex-1 h-9 rounded-xl bg-gray-200 animate-pulse" />
+          </div>
           {/* Filter chips */}
           <div className="flex gap-2 overflow-hidden">
             {[80, 60, 100, 72].map((w, i) => (

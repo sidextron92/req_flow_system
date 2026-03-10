@@ -43,6 +43,7 @@ npm run lint   # ESLint
 |-------|--------|-------------|
 | `/api/requirements` | GET | List requirements for a user |
 | `/api/requirements` | POST | Create requirement + upload files + run AI extraction |
+| `/api/requirements/assigned` | GET | Requirements assigned to a user (excludes DRAFT/COMPLETED); includes creator name + darkstore_name |
 | `/api/requirements/[id]` | GET | Single requirement with products |
 | `/api/requirements/[id]` | PATCH | Save final extraction → status OPEN |
 | `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array |
@@ -225,3 +226,4 @@ GiST trigram indexes: `idx_brand_trgm` on `brand_name`, `idx_product_trgm` on `p
 - Stray `package-lock.json` at `/Users/bijnis/` causes a Next.js workspace root warning (harmless)
 - `viewport` must use `export const viewport: Viewport` (not inside `metadata`) in Next.js 16
 - No Supabase Auth — never add it without a larger refactor; userId from URL param is intentional for now
+- Home page uses a `mounted` guard (`if (!mounted) return <HomeSkeleton />`) to prevent hydration mismatch — the server renders the skeleton (no URL params), client renders the real content after mount. The hydration warning in dev mode is a false positive; production is unaffected.
