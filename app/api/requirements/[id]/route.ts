@@ -41,6 +41,7 @@ interface Product {
 }
 
 interface PatchBody {
+  userId?: string | null;           // who triggered the save
   label_name?: string | null;
   label_id?: string | null;
   category_name?: string | null;
@@ -87,13 +88,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { label_name, label_id, category_name, expiry_date, qty_required, remarks, products, bijnis_buyer_id, supply_tl_id, extracted_data, model_used } = body;
+  const { userId, label_name, label_id, category_name, expiry_date, qty_required, remarks, products, bijnis_buyer_id, supply_tl_id, extracted_data, model_used } = body;
 
   // ── 1. Resolve assignee via rule engine ────────────────────
   const assigneeId = resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id);
 
   // ── 2. Update requirements row ─────────────────────────────
-  const updatePayload: Record<string, unknown> = { status: "OPEN" };
+  const updatePayload: Record<string, unknown> = {
+    status: "OPEN",
+    updated_by: userId ? parseInt(userId, 10) : null,
+  };
   if (label_name    !== undefined) updatePayload.label_name    = label_name    || null;
   if (label_id      !== undefined) updatePayload.label_id      = label_id      || null;
   if (category_name !== undefined) updatePayload.category_name = category_name || null;

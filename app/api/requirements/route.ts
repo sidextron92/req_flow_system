@@ -135,6 +135,7 @@ export async function POST(req: NextRequest) {
       remarks:       remarks      || null,
       attachments,
       created_by:    parseInt(userId, 10),
+      updated_by:    parseInt(userId, 10),
     })
     .select("id")
     .single();
@@ -162,15 +163,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: prodError.message }, { status: 500 });
     }
   }
-
-  // ── Log initial DRAFT status ───────────────────────────────
-  await supabaseAdmin.from("status_update_log").insert({
-    requirement_id: requirementId,
-    changed_by:     parseInt(userId, 10),
-    change_type:    "STATUS_CHANGE",
-    old_value:      null,
-    new_value:      "DRAFT",
-  });
 
   // ── Run AI extraction ──────────────────────────────────────
   let extractedData: Record<string, unknown> | null = null;

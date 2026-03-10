@@ -56,12 +56,12 @@ npm run lint   # ESLint
 ## DB schema (key tables)
 - **users** — `id BIGINT PK`, name, role, phone, darkstore_id, darkstore_name
 - **categories** — `id UUID PK`, name
-- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), assigned_to_user_id, assigned_date
+- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
 - **brand_product_data** — brand_name, brand_id, product_name, product_id. Has GiST trigram indexes for fuzzy search
 - **ai_extractions** — requirement_id FK, extracted_data JSONB, model_used
 - **status_update_log** — audit trail for status/assignment/field changes
-- Trigger: `set_updated_at()` auto-fires on requirements UPDATE
+- Triggers: `set_updated_at()` stamps `updated_at` BEFORE UPDATE; `log_requirement_changes()` writes to `status_update_log` AFTER UPDATE when `status` or `assigned_to_user_id` changes — reads `updated_by` as `changed_by` (NULL if not set)
 - RPCs: `fuzzy_search_brands(query, limit)`, `fuzzy_search_products(query, limit)`
 
 ## Required env vars (.env.local)
@@ -174,6 +174,7 @@ Shown when at least one brand or product has suggestions but no exact match.
 
 The PATCH payload sent by the client:
 ```
+userId,              ← the manager's user ID (written to requirements.updated_by for audit trigger)
 label_name, label_id, category_name, expiry_date, qty_required, remarks,
 products[],          ← array of { product_name, product_id, notes }
 bijnis_buyer_id,     ← from the matched product's fuzzy result (null if "as typed" or no product match)

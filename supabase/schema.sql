@@ -110,6 +110,9 @@ CREATE TABLE IF NOT EXISTS requirements (
   -- Creator
   created_by          BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
 
+  -- Last writer (used by status_update_log trigger to record changed_by)
+  updated_by          BIGINT REFERENCES users(id) ON DELETE SET NULL,
+
   -- Assignment (done post-creation)
   assigned_to_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
   assigned_date       TIMESTAMPTZ
@@ -146,7 +149,7 @@ CREATE INDEX idx_req_products_requirement_id ON requirement_products(requirement
 CREATE TABLE IF NOT EXISTS status_update_log (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   requirement_id   UUID NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
-  changed_by       BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  changed_by       BIGINT REFERENCES users(id) ON DELETE SET NULL,  -- nullable: NULL means unknown/external update
   change_type      status_change_type NOT NULL,
   old_value        TEXT,
   new_value        TEXT NOT NULL,
@@ -192,11 +195,56 @@ CREATE TRIGGER requirements_updated_at
 
 
 -- ============================================================
+-- STATUS / ASSIGNMENT CHANGE AUDIT TRIGGER
+-- Fires AFTER UPDATE on requirements.
+-- Reads NEW.updated_by as changed_by (NULL if not set by caller).
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION log_requirement_changes()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- STATUS_CHANGE
+  IF OLD.status IS DISTINCT FROM NEW.status THEN
+    INSERT INTO status_update_log (requirement_id, changed_by, change_type, old_value, new_value)
+    VALUES (NEW.id, NEW.updated_by, 'STATUS_CHANGE', OLD.status::TEXT, NEW.status::TEXT);
+  END IF;
+
+  -- ASSIGNMENT_CHANGE
+  IF OLD.assigned_to_user_id IS DISTINCT FROM NEW.assigned_to_user_id THEN
+    INSERT INTO status_update_log (requirement_id, changed_by, change_type, old_value, new_value)
+    VALUES (
+      NEW.id,
+      NEW.updated_by,
+      'ASSIGNMENT_CHANGE',
+      OLD.assigned_to_user_id::TEXT,
+      COALESCE(NEW.assigned_to_user_id::TEXT, 'NULL')
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER log_requirement_changes_trigger
+  AFTER UPDATE ON requirements
+  FOR EACH ROW
+  EXECUTE FUNCTION log_requirement_changes();
+
+
+-- ============================================================
 -- MIGRATIONS (run if applying to an existing DB)
 -- ============================================================
 
 -- Add qty_required field (mandatory for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
+
+-- Add updated_by to requirements (used by audit trigger)
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+
+-- Make changed_by nullable in status_update_log (unknown/external updates have no user)
+ALTER TABLE status_update_log ALTER COLUMN changed_by DROP NOT NULL;
 
 -- Add skid and managerid to users
 ALTER TABLE users ADD COLUMN IF NOT EXISTS skid TEXT;

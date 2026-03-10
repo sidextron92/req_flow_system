@@ -539,6 +539,7 @@ export default function RequirementForm({
         <ExtractionReview
           requirementId={extraction.requirementId}
           requirementType={extraction.requirementType}
+          userId={String(userId)}
           notes={notes}
           storagePaths={extraction.storagePaths}
           initialExtraction={extraction.extractedData}

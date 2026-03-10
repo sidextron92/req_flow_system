@@ -7,6 +7,7 @@ import { validateExtraction, type ValidationResult } from "@/lib/extraction-vali
 interface ExtractionReviewProps {
   requirementId: string;
   requirementType: string;   // DB enum value e.g. "RESTOCK"
+  userId: string;
   notes: string;
   storagePaths: string[];
   initialExtraction: Record<string, unknown> | null;
@@ -40,6 +41,7 @@ interface FuzzyMatchState {
 export default function ExtractionReview({
   requirementId,
   requirementType,
+  userId,
   notes,
   storagePaths,
   initialExtraction,
@@ -138,6 +140,7 @@ export default function ExtractionReview({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          userId,
           label_name:        finalExtraction.label_name    ?? null,
           label_id:          finalExtraction.label_id      ?? null,
           category_name:     finalExtraction.category_name ?? null,
