@@ -61,7 +61,45 @@ const STATUS_COLORS: Record<string, string> = {
   COMPLETED:             "bg-green-100 text-green-700",
   INCOMPLETE:            "bg-red-100 text-red-700",
   PARTIALLY_COMPLETE:    "bg-orange-100 text-orange-700",
+  CANNOT_BE_DONE:        "bg-gray-100 text-gray-500",
 };
+
+// ─── Status transition rules ──────────────────────────────────────────────────
+
+const CREATOR_TRANSITIONS: Record<string, string[]> = {
+  REVIEW_FOR_COMPLETION: ["COMPLETED", "PARTIALLY_COMPLETE", "INCOMPLETE"],
+};
+
+const ASSIGNEE_TRANSITIONS: Record<string, string[]> = {
+  OPEN:       ["IN_PROCESS", "CANNOT_BE_DONE"],
+  IN_PROCESS: ["REVIEW_FOR_COMPLETION", "CANNOT_BE_DONE"],
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  OPEN:                  "Open",
+  IN_PROCESS:            "In Process",
+  REVIEW_FOR_COMPLETION: "Review for Completion",
+  COMPLETED:             "Completed",
+  INCOMPLETE:            "Incomplete",
+  PARTIALLY_COMPLETE:    "Partially Complete",
+  CANNOT_BE_DONE:        "Cannot Be Done",
+};
+
+function getAllowedTransitions(
+  currentStatus: string,
+  userId: number,
+  createdBy: number,
+  assignedToUserId: number | null,
+): string[] {
+  const transitions: string[] = [];
+  if (createdBy === userId) {
+    transitions.push(...(CREATOR_TRANSITIONS[currentStatus] ?? []));
+  }
+  if (assignedToUserId === userId) {
+    transitions.push(...(ASSIGNEE_TRANSITIONS[currentStatus] ?? []));
+  }
+  return transitions;
+}
 
 const TYPE_LABELS: Record<string, string> = {
   RESTOCK:     "Restock",
@@ -155,14 +193,142 @@ function DeadlineBadge({ expiry }: { expiry: string | null }) {
   );
 }
 
+// ─── Status Update ────────────────────────────────────────────────────────────
+
+function StatusUpdateDialog({
+  fromStatus,
+  toStatus,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  fromStatus: string;
+  toStatus: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 pb-6">
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 flex flex-col gap-4 shadow-xl">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-base font-bold text-gray-900">Update Status</h3>
+          <p className="text-sm text-gray-500">
+            Move from{" "}
+            <span className="font-medium text-gray-700">{STATUS_LABELS[fromStatus] ?? fromStatus}</span>
+            {" "}to{" "}
+            <span className="font-medium text-gray-700">{STATUS_LABELS[toStatus] ?? toStatus}</span>?
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium transition-colors"
+          >
+            {loading ? "Updating…" : "Confirm"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusUpdater({
+  req,
+  userId,
+  onStatusChange,
+}: {
+  req: Requirement;
+  userId: number;
+  onStatusChange: (newStatus: string) => void;
+}) {
+  const [pending, setPending]   = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+
+  const allowed = getAllowedTransitions(
+    req.status,
+    userId,
+    req.created_by,
+    req.assigned_to_user_id,
+  );
+
+  if (allowed.length === 0) return null;
+
+  async function applyTransition(newStatus: string) {
+    setUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/requirements/${req.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, newStatus }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "Failed to update status");
+      }
+      onStatusChange(newStatus);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setUpdating(false);
+      setPending(null);
+    }
+  }
+
+  // Style: destructive-ish for CANNOT_BE_DONE, primary for others
+  function btnClass(status: string) {
+    if (status === "CANNOT_BE_DONE") {
+      return "px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-300 text-gray-500 hover:bg-gray-100 active:bg-gray-200 transition-colors";
+    }
+    return "px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white active:bg-blue-800 transition-colors";
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 pt-1">
+        {allowed.map((s) => (
+          <button key={s} onClick={() => setPending(s)} className={btnClass(s)}>
+            Mark as {STATUS_LABELS[s] ?? s}
+          </button>
+        ))}
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+
+      {pending && (
+        <StatusUpdateDialog
+          fromStatus={req.status}
+          toStatus={pending}
+          onConfirm={() => applyTransition(pending)}
+          onCancel={() => { if (!updating) setPending(null); }}
+          loading={updating}
+        />
+      )}
+    </>
+  );
+}
+
 // ─── Collapsible Overview ─────────────────────────────────────────────────────
 
 function CollapsibleOverview({
   req,
   assignedUser,
+  userId,
+  onStatusChange,
 }: {
   req: Requirement;
   assignedUser: AssignedUser | null;
+  userId: number;
+  onStatusChange: (newStatus: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -183,11 +349,16 @@ function CollapsibleOverview({
       </button>
 
       {/* Always-visible summary: type badge + deadline */}
-      <div className="px-4 pb-4 flex items-center gap-3 flex-wrap">
+      <div className="px-4 pb-1 flex items-center gap-3 flex-wrap">
         <span className={`inline-block text-xs font-semibold px-2.5 py-1 rounded-full ${TYPE_COLORS[req.type] ?? "bg-gray-100 text-gray-600"}`}>
           {TYPE_LABELS[req.type] ?? req.type}
         </span>
         <DeadlineBadge expiry={req.expiry_date} />
+      </div>
+
+      {/* Status update actions */}
+      <div className="px-4 pb-4">
+        <StatusUpdater req={req} userId={userId} onStatusChange={onStatusChange} />
       </div>
 
       {/* Expandable details */}
@@ -644,6 +815,10 @@ function DetailContent() {
     setReq((prev) => prev ? { ...prev, comment_log: [...prev.comment_log, entry] } : prev);
   }
 
+  function handleStatusChange(newStatus: string) {
+    setReq((prev) => prev ? { ...prev, status: newStatus } : prev);
+  }
+
   if (loading) {
     return <DetailSkeleton />;
   }
@@ -725,7 +900,12 @@ function DetailContent() {
         <div className="flex-1 px-4 py-5 flex flex-col gap-4 pb-8">
 
           {/* Collapsible Overview */}
-          <CollapsibleOverview req={req} assignedUser={assignedUser} />
+          <CollapsibleOverview
+            req={req}
+            assignedUser={assignedUser}
+            userId={userId}
+            onStatusChange={handleStatusChange}
+          />
 
           {/* Label & Category */}
           <Section title="Label & Category">
