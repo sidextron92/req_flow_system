@@ -507,6 +507,73 @@ function ChatBox({
   );
 }
 
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
+function SkeletonBlock({ className }: { className: string }) {
+  return <div className={`bg-gray-200 rounded animate-pulse ${className}`} />;
+}
+
+function DetailSkeleton() {
+  return (
+    <main className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10 flex items-center gap-3">
+        <div className="w-7 h-7 rounded-lg bg-gray-200 animate-pulse shrink-0" />
+        <div className="flex-1 flex flex-col gap-1.5">
+          <SkeletonBlock className="h-3 w-16" />
+          <SkeletonBlock className="h-5 w-40" />
+        </div>
+        <div className="h-6 w-16 rounded-full bg-gray-200 animate-pulse shrink-0" />
+      </header>
+
+      {/* Tab bar */}
+      <div className="bg-white border-b border-gray-200 px-4 py-2 sticky top-[73px] z-10 flex gap-1">
+        <div className="flex-1 h-8 rounded-xl bg-gray-100 animate-pulse" />
+        <div className="flex-1 h-8 rounded-xl bg-gray-200 animate-pulse" />
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 px-4 py-5 flex flex-col gap-4 pb-8">
+        {/* Overview card */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <SkeletonBlock className="h-3.5 w-16" />
+            <SkeletonBlock className="h-4 w-4 rounded" />
+          </div>
+          <div className="flex gap-2">
+            <SkeletonBlock className="h-6 w-20 rounded-full" />
+            <SkeletonBlock className="h-6 w-28 rounded-full" />
+          </div>
+        </div>
+
+        {/* Label & Category card */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-3 shadow-sm">
+          <SkeletonBlock className="h-3.5 w-28" />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex flex-col gap-1">
+                <SkeletonBlock className="h-3 w-16" />
+                <SkeletonBlock className="h-4 w-24" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Products card */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-3 shadow-sm">
+          <SkeletonBlock className="h-3.5 w-20" />
+          {[1, 2].map((i) => (
+            <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5 flex flex-col gap-1.5">
+              <SkeletonBlock className="h-4 w-36" />
+              <SkeletonBlock className="h-3 w-20" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function DetailContent() {
@@ -578,11 +645,7 @@ function DetailContent() {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 max-w-md mx-auto flex items-center justify-center">
-        <div className="text-gray-400 text-sm">Loading…</div>
-      </div>
-    );
+    return <DetailSkeleton />;
   }
 
   if (error || !req) {
@@ -733,11 +796,7 @@ function DetailContent() {
 
 export default function RequirementDetailPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 max-w-md mx-auto flex items-center justify-center">
-        <div className="text-gray-400 text-sm">Loading…</div>
-      </div>
-    }>
+    <Suspense fallback={<DetailSkeleton />}>
       <DetailContent />
     </Suspense>
   );
