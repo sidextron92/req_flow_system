@@ -10,18 +10,21 @@ interface FuzzySearchBody {
   product_names?: string[];
 }
 
-interface BrandRow   { brand_name: string;   brand_id: string;   score: number }
-interface ProductRow { product_name: string; product_id: string; score: number }
+interface BrandRow   { brand_name: string; brand_id: string; supply_tl_id: string | null; supply_tl_name: string | null; score: number }
+interface ProductRow { product_name: string; product_id: string; brand_id: string; brand_name: string; bijnis_buyer_id: string | null; bijnis_buyer_name: string | null; score: number }
+
+interface LabelMatch { brand_name: string; brand_id: string; supply_tl_id: string | null; supply_tl_name: string | null }
+interface ProductMatch { product_name: string; product_id: string; brand_id: string; brand_name: string; bijnis_buyer_id: string | null; bijnis_buyer_name: string | null }
 
 interface LabelResult {
-  exact: { brand_name: string; brand_id: string } | null;
-  suggestions: Array<{ brand_name: string; brand_id: string }>;
+  exact: LabelMatch | null;
+  suggestions: LabelMatch[];
 }
 
 interface ProductResult {
   original: string;
-  exact: { product_name: string; product_id: string } | null;
-  suggestions: Array<{ product_name: string; product_id: string }>;
+  exact: ProductMatch | null;
+  suggestions: ProductMatch[];
 }
 
 const SUGGESTION_LIMIT = 5; // fetch 5, first may be exact → leaves 4 suggestions
@@ -65,12 +68,17 @@ export async function POST(req: NextRequest) {
 
     if (exactIdx !== -1) {
       const exact = rows[exactIdx];
-      labelResult = { exact: { brand_name: exact.brand_name, brand_id: exact.brand_id }, suggestions: [] };
+      labelResult = {
+        exact: { brand_name: exact.brand_name, brand_id: exact.brand_id, supply_tl_id: exact.supply_tl_id ?? null, supply_tl_name: exact.supply_tl_name ?? null },
+        suggestions: [],
+      };
     } else {
       // No exact match — return top 4 as suggestions (already deduplicated by SQL DISTINCT ON)
       const suggestions = rows.slice(0, 4).map((r) => ({
-        brand_name: r.brand_name,
-        brand_id:   r.brand_id,
+        brand_name:    r.brand_name,
+        brand_id:      r.brand_id,
+        supply_tl_id:  r.supply_tl_id  ?? null,
+        supply_tl_name: r.supply_tl_name ?? null,
       }));
       labelResult = { exact: null, suggestions };
     }
@@ -108,13 +116,24 @@ export async function POST(req: NextRequest) {
         const exact = rows[exactIdx];
         productResults.push({
           original: query,
-          exact: { product_name: exact.product_name, product_id: exact.product_id },
+          exact: {
+            product_name:      exact.product_name,
+            product_id:        exact.product_id,
+            brand_id:          exact.brand_id,
+            brand_name:        exact.brand_name,
+            bijnis_buyer_id:   exact.bijnis_buyer_id   ?? null,
+            bijnis_buyer_name: exact.bijnis_buyer_name ?? null,
+          },
           suggestions: [],
         });
       } else {
         const suggestions = rows.slice(0, 4).map((r) => ({
-          product_name: r.product_name,
-          product_id:   r.product_id,
+          product_name:      r.product_name,
+          product_id:        r.product_id,
+          brand_id:          r.brand_id,
+          brand_name:        r.brand_name,
+          bijnis_buyer_id:   r.bijnis_buyer_id   ?? null,
+          bijnis_buyer_name: r.bijnis_buyer_name ?? null,
         }));
         productResults.push({ original: query, exact: null, suggestions });
       }

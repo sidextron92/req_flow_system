@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /Users/bijnis/Documents/Projects/reqFlow_exp/app/requirements/[id])",
+      "Bash(ls /Users/bijnis/Documents/Projects/reqFlow_exp/app/api/requirements/[id])",
+      "WebFetch(domain:supabase.com)",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__apply_migration",
+      "Bash(git add app/requirements/[id]/page.tsx app/api/brand-product/fuzzy-search/route.ts app/api/requirements/[id]/route.ts app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js)",
+      "Bash(git add 'app/requirements/[id]/page.tsx' 'app/api/brand-product/fuzzy-search/route.ts' 'app/api/requirements/[id]/route.ts' app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js .claude/)"
+    ]
+  }
+}

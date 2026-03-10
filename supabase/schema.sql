@@ -37,13 +37,15 @@ CREATE TYPE status_change_type AS ENUM (
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS users (
-  id            BIGINT PRIMARY KEY,
-  name          TEXT NOT NULL,
-  role          TEXT NOT NULL,
-  phone         TEXT,
-  darkstore_id  TEXT,
+  id             BIGINT PRIMARY KEY,
+  skid           TEXT,
+  name           TEXT NOT NULL,
+  role           TEXT NOT NULL,
+  phone          TEXT,
+  darkstore_id   TEXT,
   darkstore_name TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  managerid      BIGINT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 
@@ -196,6 +198,16 @@ CREATE TRIGGER requirements_updated_at
 -- Add qty_required field (mandatory for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
 
+-- Add skid and managerid to users
+ALTER TABLE users ADD COLUMN IF NOT EXISTS skid TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS managerid BIGINT;
+
+-- Add buyer and supply TL columns to brand_product_data
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS bijnis_buyer_id TEXT;
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS bijnis_buyer_name TEXT;
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_id TEXT;
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_name TEXT;
+
 
 -- ============================================================
 -- BRAND PRODUCT DATA
@@ -204,12 +216,16 @@ ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS brand_product_data (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  brand_name   TEXT NOT NULL,
-  brand_id     TEXT NOT NULL,
-  product_name TEXT NOT NULL,
-  product_id   TEXT NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_name         TEXT NOT NULL,
+  brand_id           TEXT NOT NULL,
+  product_name       TEXT NOT NULL,
+  product_id         TEXT NOT NULL,
+  bijnis_buyer_id    TEXT,
+  bijnis_buyer_name  TEXT,
+  supply_tl_id       TEXT,
+  supply_tl_name     TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Drop old btree indexes (replaced by GiST below)
@@ -232,17 +248,18 @@ CREATE INDEX IF NOT EXISTS idx_product_trgm ON brand_product_data USING gist (pr
 -- Returns distinct brands closest to the query string.
 -- Deduplication: DISTINCT ON (lower(brand_name)) so each unique
 -- brand name appears only once regardless of how many products it has.
+-- supply_tl_id / supply_tl_name are sourced from the highest-scoring row per brand.
 CREATE OR REPLACE FUNCTION fuzzy_search_brands(query TEXT, result_limit INT DEFAULT 5)
-RETURNS TABLE (brand_name TEXT, brand_id TEXT, score REAL)
+RETURNS TABLE (brand_name TEXT, brand_id TEXT, supply_tl_id TEXT, supply_tl_name TEXT, score REAL)
 LANGUAGE sql STABLE
 AS $$
-  -- Subquery: pick the highest-scoring row per distinct brand name,
-  -- then re-order the deduplicated results by score DESC.
-  SELECT b.brand_name, b.brand_id, b.score
+  SELECT b.brand_name, b.brand_id, b.supply_tl_id, b.supply_tl_name, b.score
   FROM (
     SELECT DISTINCT ON (lower(b2.brand_name))
       b2.brand_name,
       b2.brand_id,
+      b2.supply_tl_id,
+      b2.supply_tl_name,
       similarity(b2.brand_name, query) AS score
     FROM brand_product_data b2
     WHERE similarity(b2.brand_name, query) > 0.15
@@ -254,15 +271,21 @@ $$;
 
 -- Returns distinct products closest to the query string.
 -- DISTINCT ON (lower(product_name)) deduplicates product name variants.
+-- brand_id / brand_name let the client derive label info from a matched product.
+-- bijnis_buyer_id / bijnis_buyer_name are sourced from the highest-scoring row per product.
 CREATE OR REPLACE FUNCTION fuzzy_search_products(query TEXT, result_limit INT DEFAULT 5)
-RETURNS TABLE (product_name TEXT, product_id TEXT, score REAL)
+RETURNS TABLE (product_name TEXT, product_id TEXT, brand_id TEXT, brand_name TEXT, bijnis_buyer_id TEXT, bijnis_buyer_name TEXT, score REAL)
 LANGUAGE sql STABLE
 AS $$
-  SELECT p.product_name, p.product_id, p.score
+  SELECT p.product_name, p.product_id, p.brand_id, p.brand_name, p.bijnis_buyer_id, p.bijnis_buyer_name, p.score
   FROM (
     SELECT DISTINCT ON (lower(p2.product_name))
       p2.product_name,
       p2.product_id,
+      p2.brand_id,
+      p2.brand_name,
+      p2.bijnis_buyer_id,
+      p2.bijnis_buyer_name,
       similarity(p2.product_name, query) AS score
     FROM brand_product_data p2
     WHERE similarity(p2.product_name, query) > 0.15

@@ -46,6 +46,11 @@ interface Requirement {
   requirement_products: RequirementProduct[];
 }
 
+interface AssignedUser {
+  name: string;
+  role: string;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
@@ -147,6 +152,74 @@ function DeadlineBadge({ expiry }: { expiry: string | null }) {
       </svg>
       {formatDate(expiry)} · {label}
     </span>
+  );
+}
+
+// ─── Collapsible Overview ─────────────────────────────────────────────────────
+
+function CollapsibleOverview({
+  req,
+  assignedUser,
+}: {
+  req: Requirement;
+  assignedUser: AssignedUser | null;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      {/* Header row — always visible, clickable */}
+      <button
+        onClick={() => setIsOpen((v) => !v)}
+        className="w-full px-4 pt-4 pb-3 flex items-center justify-between"
+      >
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Overview</h2>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {/* Always-visible summary: type badge + deadline */}
+      <div className="px-4 pb-4 flex items-center gap-3 flex-wrap">
+        <span className={`inline-block text-xs font-semibold px-2.5 py-1 rounded-full ${TYPE_COLORS[req.type] ?? "bg-gray-100 text-gray-600"}`}>
+          {TYPE_LABELS[req.type] ?? req.type}
+        </span>
+        <DeadlineBadge expiry={req.expiry_date} />
+      </div>
+
+      {/* Expandable details */}
+      {isOpen && (
+        <div className="border-t border-gray-100 px-4 py-4 flex flex-col gap-4">
+          {/* Assignment */}
+          {(req.assigned_to_user_id || req.assigned_date) && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {req.assigned_to_user_id && (
+                <Row
+                  label="Assigned to"
+                  value={
+                    assignedUser
+                      ? `${assignedUser.name} (${assignedUser.role})`
+                      : `User ${req.assigned_to_user_id}`
+                  }
+                />
+              )}
+              {req.assigned_date && (
+                <Row label="Assigned on" value={formatDate(req.assigned_date)} />
+              )}
+            </div>
+          )}
+
+          {/* Created / Updated */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <Row label="Created"      value={formatDate(req.created_at)} />
+            <Row label="Last updated" value={formatDate(req.updated_at)} />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -392,12 +465,8 @@ function ChatBox({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100">
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Comments</h2>
-      </div>
-
-      <div className="flex-1 min-h-[200px] max-h-[360px] overflow-y-auto px-4 py-3 flex flex-col gap-3">
+    <div className="flex flex-col flex-1 min-h-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-3">
         {comments.length === 0 ? (
           <p className="text-xs text-gray-400 text-center py-8">No comments yet. Start the conversation!</p>
         ) : (
@@ -410,7 +479,7 @@ function ChatBox({
 
       <form
         onSubmit={submit}
-        className="border-t border-gray-100 px-3 py-2.5 flex items-end gap-2"
+        className="border-t border-gray-100 px-3 py-2.5 flex items-end gap-2 shrink-0"
       >
         <textarea
           value={text}
@@ -446,10 +515,12 @@ function DetailContent() {
   const router       = useRouter();
   const userId       = Number(searchParams.get("userId") ?? 0);
 
-  const [req, setReq]           = useState<Requirement | null>(null);
-  const [userName, setUserName] = useState<string>("");
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
+  const [req, setReq]                   = useState<Requirement | null>(null);
+  const [userName, setUserName]         = useState<string>("");
+  const [assignedUser, setAssignedUser] = useState<AssignedUser | null>(null);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
+  const [activeTab, setActiveTab]       = useState<"requirement" | "chat">("requirement");
 
   const fetchReq = useCallback(async () => {
     setLoading(true);
@@ -462,13 +533,36 @@ function DetailContent() {
 
       if (!reqRes.ok) { setError("Requirement not found."); return; }
       const reqJson = await reqRes.json();
-      setReq(reqJson.data);
+      const reqData: Requirement = reqJson.data;
+      setReq(reqData);
 
+      let currentUserData: { name: string; role: string } | null = null;
       if (userRes?.ok) {
         const userJson = await userRes.json();
-        setUserName(userJson.data?.name ?? `User ${userId}`);
+        currentUserData = userJson.data ?? null;
+        setUserName(currentUserData?.name ?? `User ${userId}`);
       } else {
         setUserName(`User ${userId}`);
+      }
+
+      // Fetch assignee details
+      if (reqData.assigned_to_user_id) {
+        if (reqData.assigned_to_user_id === userId && currentUserData) {
+          // Assigned to self — reuse already-fetched data
+          setAssignedUser({ name: currentUserData.name, role: currentUserData.role });
+        } else {
+          try {
+            const assigneeRes = await fetch(`/api/user?userId=${reqData.assigned_to_user_id}`);
+            if (assigneeRes.ok) {
+              const assigneeJson = await assigneeRes.json();
+              if (assigneeJson.data) {
+                setAssignedUser({ name: assigneeJson.data.name, role: assigneeJson.data.role });
+              }
+            }
+          } catch {
+            // non-fatal — falls back to "User <id>"
+          }
+        }
       }
     } catch {
       setError("Failed to load requirement.");
@@ -504,6 +598,10 @@ function DetailContent() {
   const backUrl  = `/?userId=${userId}`;
   const comments = flattenComments(req.comment_log);
 
+  // Red dot: last comment is from someone other than the current user
+  const lastComment = comments[comments.length - 1];
+  const hasUnread   = !!lastComment && lastComment.userId !== userId;
+
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto">
       {/* Header */}
@@ -526,91 +624,109 @@ function DetailContent() {
         </span>
       </header>
 
-      {/* Body */}
-      <div className="flex-1 px-4 py-5 flex flex-col gap-4 pb-8">
-
-        {/* Overview */}
-        <Section title="Overview">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-            <Row label="Type" value={
-              <span className={`inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full ${TYPE_COLORS[req.type] ?? "bg-gray-100 text-gray-600"}`}>
-                {TYPE_LABELS[req.type] ?? req.type}
-              </span>
-            } />
-            <Row label="Status" value={
-              <span className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full ${STATUS_COLORS[req.status] ?? "bg-gray-100 text-gray-600"}`}>
-                {req.status.replace(/_/g, " ")}
-              </span>
-            } />
-            <Row label="Created"      value={formatDate(req.created_at)} />
-            <Row label="Last updated" value={formatDate(req.updated_at)} />
-            <div className="col-span-2">
-              <Row label="Deadline" value={<DeadlineBadge expiry={req.expiry_date} />} />
-            </div>
-          </div>
-        </Section>
-
-        {/* Label & Category */}
-        <Section title="Label & Category">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-            {req.label_name   && <Row label="Label name"   value={req.label_name} />}
-            {req.label_id     && <Row label="Label ID"     value={req.label_id} />}
-            <Row label="Category" value={req.category_name} />
-            {req.qty_required && <Row label="Qty required" value={req.qty_required} />}
-          </div>
-        </Section>
-
-        {/* Remarks */}
-        {req.remarks && (
-          <Section title="Remarks">
-            <p className="text-sm text-gray-700 leading-relaxed">{req.remarks}</p>
-          </Section>
-        )}
-
-        {/* Products */}
-        {req.requirement_products.length > 0 && (
-          <Section title={`Products (${req.requirement_products.length})`}>
-            <ul className="flex flex-col gap-2">
-              {req.requirement_products.map((p, i) => (
-                <li key={p.id} className="bg-gray-50 rounded-xl px-3 py-2.5 flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-gray-800">{p.product_name}</span>
-                    {req.requirement_products.length > 1 && (
-                      <span className="text-xs text-gray-400">#{i + 1}</span>
-                    )}
-                  </div>
-                  {p.product_id && <span className="text-xs text-gray-400">ID: {p.product_id}</span>}
-                  {p.notes      && <span className="text-xs text-gray-600 mt-0.5">{p.notes}</span>}
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {/* Attachments — carousel */}
-        {req.attachments.length > 0 && (
-          <AttachmentsSection attachments={req.attachments} />
-        )}
-
-        {/* Assignment */}
-        {(req.assigned_to_user_id || req.assigned_date) && (
-          <Section title="Assignment">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              {req.assigned_to_user_id && <Row label="Assigned to" value={`User ${req.assigned_to_user_id}`} />}
-              {req.assigned_date       && <Row label="Assigned on" value={formatDate(req.assigned_date)} />}
-            </div>
-          </Section>
-        )}
-
-        {/* Comments */}
-        <ChatBox
-          comments={comments}
-          userId={userId}
-          userName={userName}
-          requirementId={req.id}
-          onNewComment={handleNewComment}
-        />
+      {/* Tab bar */}
+      <div className="bg-white border-b border-gray-200 px-4 py-2 sticky top-[73px] z-10 flex gap-1">
+        <button
+          onClick={() => setActiveTab("requirement")}
+          className={`flex-1 py-1.5 rounded-xl text-sm font-medium transition-colors ${
+            activeTab === "requirement"
+              ? "bg-gray-100 text-gray-900"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Requirement
+        </button>
+        <button
+          onClick={() => setActiveTab("chat")}
+          className={`flex-1 py-1.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${
+            activeTab === "chat"
+              ? "bg-gray-100 text-gray-900"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Chat
+          {comments.length > 0 && (
+            <span className="bg-gray-200 text-gray-600 text-xs font-semibold px-1.5 py-0.5 rounded-full leading-none">
+              {comments.length}
+            </span>
+          )}
+          {hasUnread && activeTab !== "chat" && (
+            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" aria-label="Unread messages" />
+          )}
+        </button>
       </div>
+
+      {/* Body */}
+      {activeTab === "requirement" ? (
+        <div className="flex-1 px-4 py-5 flex flex-col gap-4 pb-8">
+
+          {/* Collapsible Overview */}
+          <CollapsibleOverview req={req} assignedUser={assignedUser} />
+
+          {/* Label & Category */}
+          <Section title="Label & Category">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {req.label_name && (
+                <Row
+                  label="Label name"
+                  value={
+                    <span>
+                      {req.label_name}
+                      {req.label_id && (
+                        <span className="text-gray-400 font-normal ml-1">({req.label_id})</span>
+                      )}
+                    </span>
+                  }
+                />
+              )}
+              <Row label="Category" value={req.category_name} />
+              {req.qty_required && <Row label="Qty required" value={req.qty_required} />}
+            </div>
+          </Section>
+
+          {/* Remarks */}
+          {req.remarks && (
+            <Section title="Remarks">
+              <p className="text-sm text-gray-700 leading-relaxed">{req.remarks}</p>
+            </Section>
+          )}
+
+          {/* Products */}
+          {req.requirement_products.length > 0 && (
+            <Section title={`Products (${req.requirement_products.length})`}>
+              <ul className="flex flex-col gap-2">
+                {req.requirement_products.map((p, i) => (
+                  <li key={p.id} className="bg-gray-50 rounded-xl px-3 py-2.5 flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-gray-800">{p.product_name}</span>
+                      {req.requirement_products.length > 1 && (
+                        <span className="text-xs text-gray-400">#{i + 1}</span>
+                      )}
+                    </div>
+                    {p.product_id && <span className="text-xs text-gray-400">ID: {p.product_id}</span>}
+                    {p.notes      && <span className="text-xs text-gray-600 mt-0.5">{p.notes}</span>}
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
+          {/* Attachments */}
+          {req.attachments.length > 0 && (
+            <AttachmentsSection attachments={req.attachments} />
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col min-h-0 px-4 py-4">
+          <ChatBox
+            comments={comments}
+            userId={userId}
+            userName={userName}
+            requirementId={req.id}
+            onNewComment={handleNewComment}
+          />
+        </div>
+      )}
     </main>
   );
 }

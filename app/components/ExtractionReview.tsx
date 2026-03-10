@@ -23,8 +23,8 @@ type ChatMessage =
 type ViewState = "extraction" | "chat" | "fuzzy-match" | "success";
 
 // ── Fuzzy match types ──────────────────────────────────────────
-interface LabelSuggestion { brand_name: string; brand_id: string }
-interface ProductSuggestion { product_name: string; product_id: string }
+interface LabelSuggestion { brand_name: string; brand_id: string; supply_tl_id: string | null; supply_tl_name: string | null }
+interface ProductSuggestion { product_name: string; product_id: string; brand_id: string; brand_name: string; bijnis_buyer_id: string | null; bijnis_buyer_name: string | null }
 
 interface FuzzyMatchState {
   labelQuery: string | null;
@@ -70,8 +70,8 @@ export default function ExtractionReview({
 
   // ── Fuzzy match state ──────────────────────────────────────
   const [fuzzyState, setFuzzyState]           = useState<FuzzyMatchState | null>(null);
-  const [selectedLabel, setSelectedLabel]     = useState<{ name: string; id: string } | null>(null);
-  const [selectedProducts, setSelectedProducts] = useState<Record<string, { name: string; id: string }>>({});
+  const [selectedLabel, setSelectedLabel]     = useState<{ name: string; id: string; supply_tl_id: string | null } | null>(null);
+  const [selectedProducts, setSelectedProducts] = useState<Record<string, { name: string; id: string; brand_id: string | null; brand_name: string | null; bijnis_buyer_id: string | null }>>({});
   const [isFuzzyChecking, setIsFuzzyChecking] = useState(false);
   const [fuzzyError, setFuzzyError]           = useState<string | null>(null);
   // Editable "as typed" text for brand and products
@@ -117,7 +117,11 @@ export default function ExtractionReview({
   }
 
   // ── Save to DB ─────────────────────────────────────────────
-  async function saveRequirement(finalExtraction: Record<string, unknown>): Promise<boolean> {
+  async function saveRequirement(
+    finalExtraction: Record<string, unknown>,
+    bijnis_buyer_id?: string | null,
+    supply_tl_id?: string | null,
+  ): Promise<boolean> {
     setIsSaving(true);
     setSaveError(null);
 
@@ -134,15 +138,17 @@ export default function ExtractionReview({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          label_name:     finalExtraction.label_name    ?? null,
-          label_id:       finalExtraction.label_id      ?? null,
-          category_name:  finalExtraction.category_name ?? null,
-          expiry_date:    finalExtraction.expiry_date   ?? null,
-          qty_required:   finalExtraction.qty_required  ?? null,
-          remarks:        finalExtraction.remarks        ?? null,
+          label_name:        finalExtraction.label_name    ?? null,
+          label_id:          finalExtraction.label_id      ?? null,
+          category_name:     finalExtraction.category_name ?? null,
+          expiry_date:       finalExtraction.expiry_date   ?? null,
+          qty_required:      finalExtraction.qty_required  ?? null,
+          remarks:           finalExtraction.remarks        ?? null,
           products,
-          extracted_data: finalExtraction,
-          model_used:     currentModel ?? "unknown",
+          bijnis_buyer_id:   bijnis_buyer_id ?? null,
+          supply_tl_id:      supply_tl_id    ?? null,
+          extracted_data:    finalExtraction,
+          model_used:        currentModel ?? "unknown",
         }),
       });
 
@@ -166,21 +172,35 @@ export default function ExtractionReview({
   function buildMergedExtraction(
     base: Record<string, unknown>,
     selLabel: { name: string; id: string } | null,
-    selProducts: Record<string, { name: string; id: string }>
+    selProducts: Record<string, { name: string; id: string; brand_id: string | null; brand_name: string | null }>
   ): Record<string, unknown> {
     const merged = { ...base };
     if (selLabel) {
       merged.label_name = selLabel.name;
-      merged.label_id   = selLabel.id;
+      merged.label_id   = selLabel.id || null;
     }
     if (Array.isArray(merged.products)) {
       merged.products = (merged.products as Record<string, unknown>[]).map((p) => {
         const origName = String(p.product_name ?? "");
         const sel = selProducts[origName];
-        if (sel) return { ...p, product_name: sel.name, product_id: sel.id };
+        if (sel) return { ...p, product_name: sel.name, product_id: sel.id || null };
         return p;
       });
     }
+
+    // Derive label_id and label_name from matched product brand info (product match wins over label match).
+    // Only apply if every resolved product that has a brand_id shares the same one.
+    const resolvedProducts = Object.values(selProducts).filter((s) => Boolean(s.brand_id));
+
+    if (resolvedProducts.length > 0) {
+      const allSameBrandId = resolvedProducts.every((s) => s.brand_id === resolvedProducts[0].brand_id);
+      if (allSameBrandId) {
+        merged.label_id   = resolvedProducts[0].brand_id;
+        merged.label_name = resolvedProducts[0].brand_name ?? merged.label_name;
+      }
+      // If they differ, leave label_id/label_name as whatever the label fuzzy match set (or original).
+    }
+
     return merged;
   }
 
@@ -234,29 +254,30 @@ export default function ExtractionReview({
       if (!labelNeedsInput && !productsNeedInput) {
         // All exact or no suggestions — auto-apply exact matches and save
         const autoLabel = json.label?.exact
-          ? { name: json.label.exact.brand_name, id: json.label.exact.brand_id }
+          ? { name: json.label.exact.brand_name, id: json.label.exact.brand_id, supply_tl_id: json.label.exact.supply_tl_id ?? null }
           : null;
-        const autoProducts: Record<string, { name: string; id: string }> = {};
+        const autoProducts: Record<string, { name: string; id: string; brand_id: string | null; brand_name: string | null; bijnis_buyer_id: string | null }> = {};
         for (const p of (json.products as ProductResult[])) {
           if (p.exact) {
-            autoProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id };
+            autoProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id, brand_id: p.exact.brand_id, brand_name: p.exact.brand_name, bijnis_buyer_id: p.exact.bijnis_buyer_id ?? null };
           }
         }
         const merged = buildMergedExtraction(finalExtraction, autoLabel, autoProducts);
+        const autoBuyerId = Object.values(autoProducts).find((s) => s.bijnis_buyer_id)?.bijnis_buyer_id ?? null;
         setIsFuzzyChecking(false);
-        const ok = await saveRequirement(merged);
+        const ok = await saveRequirement(merged, autoBuyerId, autoLabel?.supply_tl_id ?? null);
         if (ok) { setView("success"); onSaved(); }
         return;
       }
 
       // Pre-select exact matches where found
       const preLabel = json.label?.exact
-        ? { name: json.label.exact.brand_name, id: json.label.exact.brand_id }
+        ? { name: json.label.exact.brand_name, id: json.label.exact.brand_id, supply_tl_id: json.label.exact.supply_tl_id ?? null }
         : null;
-      const preProducts: Record<string, { name: string; id: string }> = {};
+      const preProducts: Record<string, { name: string; id: string; brand_id: string | null; brand_name: string | null; bijnis_buyer_id: string | null }> = {};
       for (const p of (json.products as ProductResult[])) {
         if (p.exact) {
-          preProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id };
+          preProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id, brand_id: p.exact.brand_id, brand_name: p.exact.brand_name, bijnis_buyer_id: p.exact.bijnis_buyer_id ?? null };
         }
       }
 
@@ -297,7 +318,8 @@ export default function ExtractionReview({
       selectedProducts
     );
     setExtraction(merged);
-    const ok = await saveRequirement(merged);
+    const buyerId = Object.values(selectedProducts).find((s) => s.bijnis_buyer_id)?.bijnis_buyer_id ?? null;
+    const ok = await saveRequirement(merged, buyerId, selectedLabel?.supply_tl_id ?? null);
     if (ok) { setView("success"); onSaved(); }
   }
 
@@ -541,7 +563,7 @@ export default function ExtractionReview({
                           key={`${s.brand_name}::${s.brand_id}`}
                           onClick={() =>
                             setSelectedLabel(
-                              isSelected ? null : { name: s.brand_name, id: s.brand_id }
+                              isSelected ? null : { name: s.brand_name, id: s.brand_id, supply_tl_id: s.supply_tl_id ?? null }
                             )
                           }
                           className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
@@ -572,7 +594,7 @@ export default function ExtractionReview({
                                 if (e.key === "Enter") {
                                   const val = (editedLabelText || fuzzyState.labelQuery!).trim();
                                   if (val) {
-                                    setSelectedLabel({ name: val, id: "" });
+                                    setSelectedLabel({ name: val, id: "", supply_tl_id: null });
                                     setEditingLabel(false);
                                   }
                                 }
@@ -583,7 +605,7 @@ export default function ExtractionReview({
                               onClick={() => {
                                 const val = (editedLabelText || fuzzyState.labelQuery!).trim();
                                 if (val) {
-                                  setSelectedLabel({ name: val, id: "" });
+                                  setSelectedLabel({ name: val, id: "", supply_tl_id: null });
                                   setEditingLabel(false);
                                 }
                               }}
@@ -600,7 +622,7 @@ export default function ExtractionReview({
                           <button
                             onClick={() =>
                               setSelectedLabel(
-                                isSelected ? null : { name: displayText, id: "" }
+                                isSelected ? null : { name: displayText, id: "", supply_tl_id: null }
                               )
                             }
                             className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
@@ -657,7 +679,7 @@ export default function ExtractionReview({
                                     delete next[p.original];
                                     return next;
                                   }
-                                  return { ...prev, [p.original]: { name: s.product_name, id: s.product_id } };
+                                  return { ...prev, [p.original]: { name: s.product_name, id: s.product_id, brand_id: s.brand_id, brand_name: s.brand_name, bijnis_buyer_id: s.bijnis_buyer_id ?? null } };
                                 });
                               }}
                               className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
@@ -694,7 +716,7 @@ export default function ExtractionReview({
                                       if (val) {
                                         setSelectedProducts((prev) => ({
                                           ...prev,
-                                          [p.original]: { name: val, id: "" },
+                                          [p.original]: { name: val, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null },
                                         }));
                                         setEditingProducts((prev) => ({ ...prev, [p.original]: false }));
                                       }
@@ -708,7 +730,7 @@ export default function ExtractionReview({
                                     if (val) {
                                       setSelectedProducts((prev) => ({
                                         ...prev,
-                                        [p.original]: { name: val, id: "" },
+                                        [p.original]: { name: val, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null },
                                       }));
                                       setEditingProducts((prev) => ({ ...prev, [p.original]: false }));
                                     }
@@ -731,7 +753,7 @@ export default function ExtractionReview({
                                       delete next[p.original];
                                       return next;
                                     }
-                                    return { ...prev, [p.original]: { name: displayText, id: "" } };
+                                    return { ...prev, [p.original]: { name: displayText, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null } };
                                   });
                                 }}
                                 className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
