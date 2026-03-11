@@ -70,6 +70,13 @@ function SettingsContent() {
       }
 
       const reg = await navigator.serviceWorker.ready;
+
+      // Unsubscribe any existing subscription first so the browser creates a
+      // fresh one — otherwise it returns the cached subscription and created_at
+      // in the DB never updates (upsert only updates changed columns).
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) await existing.unsubscribe();
+
       const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
