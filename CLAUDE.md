@@ -46,9 +46,12 @@ npm run lint   # ESLint
 | `/api/requirements/assigned` | GET | Requirements assigned to a user (excludes DRAFT/COMPLETED); includes creator name + darkstore_name |
 | `/api/requirements/[id]` | GET | Single requirement with products |
 | `/api/requirements/[id]` | PATCH | Save final extraction → status OPEN |
+| `/api/requirements/[id]/status` | PATCH | Role-gated status transition; validates role + transition, writes audit log |
+| `/api/requirements/[id]/assign` | PATCH | Reassign to a different bijnisBuyer; only current assignee (role=bijnisBuyer) can call; status must be OPEN or IN_PROCESS; ASSIGNMENT_CHANGE written via DB trigger; assigned_date unchanged |
 | `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array |
 | `/api/categories` | GET | All categories |
 | `/api/user` | GET | User info from users table |
+| `/api/users/bijnisBuyers` | GET | All users with role='bijnisBuyer' (id, name, phone); used by reassign bottom sheet |
 | `/api/transcribe` | POST | Deepgram: audio → Hindi transcript |
 | `/api/ai/fill-missing` | POST | AI fills missing fields from chat input |
 | `/api/ai/re-extract` | POST | Re-run extraction with edited system prompt |
@@ -218,6 +221,135 @@ When an assignment is resolved, `assigned_date` is also set to `NOW()`.
 | `supply_tl_name` | TEXT | Supply TL display name (informational) |
 
 GiST trigram indexes: `idx_brand_trgm` on `brand_name`, `idx_product_trgm` on `product_name`.
+
+---
+
+### Step 6 — Status Update workflow (`PATCH /api/requirements/[id]/status`)
+
+#### 6.1 Status values
+
+| Status | Meaning |
+|--------|---------|
+| `DRAFT` | Created by form submit; awaiting AI extraction review |
+| `OPEN` | Extraction finalized; waiting for assignee to act |
+| `IN_PROCESS` | Assignee has started working |
+| `REVIEW_FOR_COMPLETION` | Assignee finished; waiting for creator's review |
+| `COMPLETED` | Creator accepted the work |
+| `PARTIALLY_COMPLETE` | Creator accepted partial completion |
+| `INCOMPLETE` | Creator rejected the work |
+| `CANNOT_BE_DONE` | Assignee marked as impossible |
+
+`DRAFT → OPEN` is automatic (happens during extraction finalization in Step 5 — not user-initiated).
+
+#### 6.2 Role-based transition rules
+
+A user must be the **creator** (`created_by = userId`) or the **assignee** (`assigned_to_user_id = userId`) to trigger any transition. Both sets of allowed transitions are combined if a user holds both roles.
+
+**Creator transitions** (only valid from `REVIEW_FOR_COMPLETION`):
+
+| From | To |
+|------|----|
+| REVIEW_FOR_COMPLETION | COMPLETED |
+| REVIEW_FOR_COMPLETION | PARTIALLY_COMPLETE |
+| REVIEW_FOR_COMPLETION | INCOMPLETE |
+
+**Assignee transitions:**
+
+| From | To |
+|------|----|
+| OPEN | IN_PROCESS |
+| OPEN | CANNOT_BE_DONE |
+| IN_PROCESS | REVIEW_FOR_COMPLETION |
+| IN_PROCESS | CANNOT_BE_DONE |
+
+Terminal states (no further transitions): `COMPLETED`, `PARTIALLY_COMPLETE`, `INCOMPLETE`, `CANNOT_BE_DONE`.
+
+**Full transition diagram:**
+```
+DRAFT ──(auto)──► OPEN
+                   │ (assignee)
+                   ▼
+              IN_PROCESS ──► CANNOT_BE_DONE
+                   │ (assignee)
+                   ▼
+        REVIEW_FOR_COMPLETION
+                   │ (creator)
+          ┌────────┼────────┐
+          ▼        ▼        ▼
+      COMPLETED  PARTIALLY  INCOMPLETE
+                 _COMPLETE
+```
+
+#### 6.3 API contract (`PATCH /api/requirements/[id]/status`)
+
+Request body:
+```json
+{ "userId": 123, "newStatus": "IN_PROCESS" }
+```
+
+Server-side validation (in order):
+1. Fetch `status`, `created_by`, `assigned_to_user_id` for the requirement (404 if missing).
+2. Determine `isCreator` and `isAssignee` from `userId`.
+3. Check if `newStatus` is in the allowed set for the user's role(s) and current status — return **403** if not.
+4. `UPDATE requirements SET status = newStatus, updated_by = userId` (triggers DB audit log).
+
+#### 6.4 DB audit trail
+
+Every status change fires the `log_requirement_changes()` trigger which inserts into `status_update_log`:
+- `change_type = 'STATUS_CHANGE'`
+- `old_value` / `new_value` — previous and new status as text
+- `changed_by` — `updated_by` from the PATCH payload
+
+#### 6.5 UI — `StatusUpdater` component (`app/requirements/[id]/page.tsx`)
+
+- Rendered inside `CollapsibleOverview` at the top of the detail page.
+- `getAllowedTransitions(currentStatus, userId, createdBy, assignedToUserId)` computes the allowed transitions client-side (mirrors server rules).
+- Only renders buttons if `allowed.length > 0`; nothing shown to users with no valid transitions.
+- Each button opens a `StatusUpdateDialog` (bottom-sheet confirmation modal) before calling the API.
+- Status badge in the header is color-coded: gray (DRAFT), blue (OPEN), yellow (IN_PROCESS), purple (REVIEW_FOR_COMPLETION), green (COMPLETED), red (INCOMPLETE), orange (PARTIALLY_COMPLETE).
+
+#### 6.6 Key files
+
+| File | Role |
+|------|------|
+| `app/requirements/[id]/page.tsx` | `StatusUpdater`, `StatusUpdateDialog`, `getAllowedTransitions`, `STATUS_COLORS`, `STATUS_LABELS` |
+| `app/api/requirements/[id]/status/route.ts` | `PATCH` handler; `CREATOR_TRANSITIONS`, `ASSIGNEE_TRANSITIONS` constants; permission + transition validation |
+
+---
+
+### Step 7 — Reassign workflow (`PATCH /api/requirements/[id]/assign`)
+
+#### 7.1 Permission rules
+- Only the **current assignee** (`assigned_to_user_id = userId`) can trigger a reassignment.
+- The current user's role must be `'bijnisBuyer'` (checked server-side).
+- The requirement must be in status `OPEN` or `IN_PROCESS`.
+- Self-assignment (`newAssigneeId = userId`) is rejected with 400.
+- The new assignee must exist in the `users` table with role `'bijnisBuyer'`.
+
+#### 7.2 DB write
+- `UPDATE requirements SET assigned_to_user_id = newAssigneeId, updated_by = userId`
+- `assigned_date` is **not** updated (original assignment date is preserved).
+- The `log_requirement_changes()` DB trigger fires automatically and writes an `ASSIGNMENT_CHANGE` row to `status_update_log`.
+
+#### 7.3 UI — `ReassignSheet` component (`app/requirements/[id]/page.tsx`)
+- Rendered in `DetailContent` as a bottom-sheet modal (`rounded-t-2xl`, slide-up).
+- Visible in `CollapsibleOverview` expanded section as a **"Change assignee"** link — only shown when:
+  - `assigned_to_user_id === userId`
+  - `userRole === 'bijnisBuyer'`
+  - `status` is `OPEN` or `IN_PROCESS`
+- Fetches `GET /api/users/bijnisBuyers` on open; shows skeleton loading state.
+- Filters out the current assignee from the list (no self-assignment).
+- Name search filters the list client-side.
+- Each list item shows buyer name + phone number.
+- On successful reassignment: closes sheet, updates `req.assigned_to_user_id` and `assignedUser` in local state, shows a `Toast` (`"Reassigned to <name>"`).
+- Toast auto-dismisses after 3 seconds.
+
+#### 7.4 Key files
+| File | Role |
+|------|------|
+| `app/requirements/[id]/page.tsx` | `ReassignSheet`, `Toast` components; `CollapsibleOverview` reassign trigger; `handleReassignSuccess` |
+| `app/api/requirements/[id]/assign/route.ts` | `PATCH` handler; permission + validation logic |
+| `app/api/users/bijnisBuyers/route.ts` | `GET` handler; returns all bijnisBuyer users |
 
 ---
 

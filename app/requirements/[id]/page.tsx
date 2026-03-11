@@ -51,6 +51,12 @@ interface AssignedUser {
   role: string;
 }
 
+interface BijnisBuyer {
+  id: number;
+  name: string;
+  phone: string | null;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
@@ -317,20 +323,231 @@ function StatusUpdater({
   );
 }
 
+// ─── Reassign Bottom Sheet ────────────────────────────────────────────────────
+
+function ReassignSheet({
+  requirementId,
+  currentAssigneeId,
+  userId,
+  onSuccess,
+  onClose,
+}: {
+  requirementId: string;
+  currentAssigneeId: number;
+  userId: number;
+  onSuccess: (newAssigneeId: number, newAssigneeName: string) => void;
+  onClose: () => void;
+}) {
+  const [buyers, setBuyers]     = useState<BijnisBuyer[]>([]);
+  const [search, setSearch]     = useState("");
+  const [loadingList, setLoadingList] = useState(true);
+  const [submitting, setSubmitting]   = useState(false);
+  const [fetchError, setFetchError]   = useState<string | null>(null);
+  const [pendingBuyer, setPendingBuyer] = useState<BijnisBuyer | null>(null);
+
+  useEffect(() => {
+    async function loadBuyers() {
+      try {
+        const res = await fetch("/api/users/bijnisBuyers");
+        if (!res.ok) throw new Error("Failed to load buyers");
+        const json = await res.json();
+        setBuyers(json.data ?? []);
+      } catch (e) {
+        setFetchError(e instanceof Error ? e.message : "Failed to load");
+      } finally {
+        setLoadingList(false);
+      }
+    }
+    loadBuyers();
+  }, []);
+
+  const filtered = buyers.filter(
+    (b) =>
+      b.id !== currentAssigneeId &&
+      b.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  async function confirmReassign() {
+    if (!pendingBuyer) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/requirements/${requirementId}/assign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, newAssigneeId: pendingBuyer.id }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "Failed to reassign");
+      }
+      onSuccess(pendingBuyer.id, pendingBuyer.name);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Something went wrong");
+      setPendingBuyer(null);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-0">
+      <div className="bg-white rounded-t-2xl w-full max-w-md flex flex-col max-h-[75vh] shadow-xl relative">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
+          <h3 className="text-base font-bold text-gray-900">Reassign To</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-4 pb-3 shrink-0">
+          <div className="relative">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name…"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+          </div>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto px-4 pb-6 min-h-0">
+          {loadingList ? (
+            <div className="flex flex-col gap-2 pt-1">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex flex-col gap-1 px-3 py-3 rounded-xl bg-gray-50">
+                  <div className="h-4 w-32 bg-gray-200 rounded animate-pulse" />
+                  <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : fetchError ? (
+            <p className="text-sm text-red-500 text-center py-8">{fetchError}</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">
+              {search ? "No buyers match your search." : "No other buyers available."}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {filtered.map((buyer) => (
+                <li key={buyer.id}>
+                  <button
+                    onClick={() => setPendingBuyer(buyer)}
+                    disabled={submitting}
+                    className="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-blue-50 active:bg-blue-100 transition-colors disabled:opacity-50 text-left"
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-gray-900">{buyer.name}</span>
+                      {buyer.phone && (
+                        <span className="text-xs text-gray-400">{buyer.phone}</span>
+                      )}
+                    </div>
+                    <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Confirmation dialog — overlaid inside the sheet */}
+        {pendingBuyer && (
+          <div className="absolute inset-0 rounded-t-2xl bg-white flex flex-col justify-end p-5 gap-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-base font-bold text-gray-900">Confirm Reassignment</h3>
+              <p className="text-sm text-gray-500">
+                Reassign this requirement to{" "}
+                <span className="font-medium text-gray-800">{pendingBuyer.name}</span>?
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPendingBuyer(null)}
+                disabled={submitting}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmReassign}
+                disabled={submitting}
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium transition-colors"
+              >
+                {submitting ? "Reassigning…" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+function Toast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] max-w-[calc(100%-2rem)]">
+      <div className="flex items-center gap-2.5 bg-gray-900 text-white text-sm font-medium px-4 py-3 rounded-2xl shadow-xl">
+        <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+        {message}
+      </div>
+    </div>
+  );
+}
+
 // ─── Collapsible Overview ─────────────────────────────────────────────────────
 
 function CollapsibleOverview({
   req,
   assignedUser,
   userId,
+  userRole,
   onStatusChange,
+  onReassign,
 }: {
   req: Requirement;
   assignedUser: AssignedUser | null;
   userId: number;
+  userRole: string;
   onStatusChange: (newStatus: string) => void;
+  onReassign: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+
+  // Show reassign button only if:
+  // - current user is the assignee
+  // - current user's role is bijnisBuyer
+  // - requirement status is OPEN or IN_PROCESS
+  const canReassign =
+    req.assigned_to_user_id === userId &&
+    userRole === "bijnisBuyer" &&
+    (req.status === "OPEN" || req.status === "IN_PROCESS");
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -366,19 +583,32 @@ function CollapsibleOverview({
         <div className="border-t border-gray-100 px-4 py-4 flex flex-col gap-4">
           {/* Assignment */}
           {(req.assigned_to_user_id || req.assigned_date) && (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              {req.assigned_to_user_id && (
-                <Row
-                  label="Assigned to"
-                  value={
-                    assignedUser
-                      ? `${assignedUser.name} (${assignedUser.role})`
-                      : `User ${req.assigned_to_user_id}`
-                  }
-                />
-              )}
-              {req.assigned_date && (
-                <Row label="Assigned on" value={formatDate(req.assigned_date)} />
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                {req.assigned_to_user_id && (
+                  <Row
+                    label="Assigned to"
+                    value={
+                      assignedUser
+                        ? `${assignedUser.name} (${assignedUser.role})`
+                        : `User ${req.assigned_to_user_id}`
+                    }
+                  />
+                )}
+                {req.assigned_date && (
+                  <Row label="Assigned on" value={formatDate(req.assigned_date)} />
+                )}
+              </div>
+              {canReassign && (
+                <button
+                  onClick={onReassign}
+                  className="self-start flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 17l5-5-5-5M2 12h19" />
+                  </svg>
+                  Change assignee
+                </button>
               )}
             </div>
           )}
@@ -755,10 +985,13 @@ function DetailContent() {
 
   const [req, setReq]                   = useState<Requirement | null>(null);
   const [userName, setUserName]         = useState<string>("");
+  const [userRole, setUserRole]         = useState<string>("");
   const [assignedUser, setAssignedUser] = useState<AssignedUser | null>(null);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const [activeTab, setActiveTab]       = useState<"requirement" | "chat">("requirement");
+  const [showReassignSheet, setShowReassignSheet] = useState(false);
+  const [toast, setToast]               = useState<string | null>(null);
 
   const fetchReq = useCallback(async () => {
     setLoading(true);
@@ -779,8 +1012,10 @@ function DetailContent() {
         const userJson = await userRes.json();
         currentUserData = userJson.data ?? null;
         setUserName(currentUserData?.name ?? `User ${userId}`);
+        setUserRole(currentUserData?.role ?? "");
       } else {
         setUserName(`User ${userId}`);
+        setUserRole("");
       }
 
       // Fetch assignee details
@@ -817,6 +1052,15 @@ function DetailContent() {
 
   function handleStatusChange(newStatus: string) {
     setReq((prev) => prev ? { ...prev, status: newStatus } : prev);
+  }
+
+  function handleReassignSuccess(newAssigneeId: number, newAssigneeName: string) {
+    setShowReassignSheet(false);
+    setReq((prev) =>
+      prev ? { ...prev, assigned_to_user_id: newAssigneeId } : prev
+    );
+    setAssignedUser({ name: newAssigneeName, role: "bijnisBuyer" });
+    setToast(`Reassigned to ${newAssigneeName}`);
   }
 
   if (loading) {
@@ -904,7 +1148,9 @@ function DetailContent() {
             req={req}
             assignedUser={assignedUser}
             userId={userId}
+            userRole={userRole}
             onStatusChange={handleStatusChange}
+            onReassign={() => setShowReassignSheet(true)}
           />
 
           {/* Label & Category */}
@@ -970,6 +1216,22 @@ function DetailContent() {
             onNewComment={handleNewComment}
           />
         </div>
+      )}
+
+      {/* Reassign bottom sheet */}
+      {showReassignSheet && req.assigned_to_user_id && (
+        <ReassignSheet
+          requirementId={req.id}
+          currentAssigneeId={req.assigned_to_user_id}
+          userId={userId}
+          onSuccess={handleReassignSuccess}
+          onClose={() => setShowReassignSheet(false)}
+        />
+      )}
+
+      {/* Success toast */}
+      {toast && (
+        <Toast message={toast} onDismiss={() => setToast(null)} />
       )}
     </main>
   );
