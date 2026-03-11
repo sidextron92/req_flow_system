@@ -899,9 +899,10 @@ export default function ExtractionReview({
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); }
+                  const isMobile = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
+                  if (e.key === "Enter" && !e.shiftKey && !isMobile) { e.preventDefault(); handleChatSend(); }
                 }}
-                placeholder="Type your reply... (Shift+Enter for new line)"
+                placeholder="Type your reply..."
                 disabled={isFilling}
                 rows={1}
                 className="flex-1 bg-gray-100 rounded-2xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 resize-none max-h-32 overflow-y-auto"

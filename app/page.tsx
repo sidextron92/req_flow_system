@@ -828,13 +828,15 @@ function HomeContent() {
         {/* Content */}
         <div className="flex-1 px-4 py-6 flex flex-col gap-5">
           {/* CTA */}
-          <button
-            onClick={() => setFormOpen(true)}
-            disabled={!userId}
-            className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-300 text-white font-semibold text-base py-4 rounded-2xl transition-colors shadow-sm"
-          >
-            + Create a New Requirement
-          </button>
+          {userRole !== "bijnisBuyer" && (
+            <button
+              onClick={() => setFormOpen(true)}
+              disabled={!userId}
+              className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-300 text-white font-semibold text-base py-4 rounded-2xl transition-colors shadow-sm"
+            >
+              + Create a New Requirement
+            </button>
+          )}
 
           {/* Requirements List */}
           <section className="flex flex-col gap-3">
