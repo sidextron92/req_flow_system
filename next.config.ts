@@ -12,5 +12,4 @@ export default withPWA({
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === "development",
   customWorkerSrc: "sw-custom.js",
-  skipWaiting: true,
 })(nextConfig);
