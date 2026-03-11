@@ -101,7 +101,9 @@ function SettingsContent() {
       });
       showToast("Notifications enabled for this device");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Error: ${msg}`);
+      console.error("[push subscribe]", err);
     } finally {
       setWorking(false);
     }
