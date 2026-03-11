@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import RequirementForm from "./components/RequirementForm";
 
@@ -67,7 +67,7 @@ const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED"]);
 
 // ─── Filter definitions ────────────────────────────────────────────────────────
 
-type FilterKey = string; // named filter keys per tab
+type FilterKey = string;
 
 interface FilterDef {
   key: FilterKey;
@@ -89,7 +89,6 @@ const FOR_ME_FILTERS: FilterDef[] = [
 const BY_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
   all_open: new Set(["DRAFT", "OPEN", "IN_PROCESS", "REVIEW_FOR_COMPLETION"]),
   closed:   new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]),
-  // action_pending handled separately (needs comment_log inspection)
 };
 
 const FOR_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
@@ -99,6 +98,41 @@ const FOR_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
 };
 
 type SortOption = "deadline_asc" | "created_desc";
+
+// ─── Fuzzy search helper ───────────────────────────────────────────────────────
+
+/** Very lightweight fuzzy match: every char in `query` must appear in order in `str`. */
+function fuzzyMatch(str: string, query: string): boolean {
+  if (!query) return true;
+  const s = str.toLowerCase();
+  const q = query.toLowerCase();
+  let si = 0;
+  for (let qi = 0; qi < q.length; qi++) {
+    const idx = s.indexOf(q[qi], si);
+    if (idx === -1) return false;
+    si = idx + 1;
+  }
+  return true;
+}
+
+function requirementMatchesSearch(
+  req: Requirement,
+  query: string,
+  tab: TabId,
+): boolean {
+  if (!query.trim()) return true;
+  const candidates: (string | null | undefined)[] = [
+    req.label_name,
+    req.category_name,
+    req.assignee?.name,
+    ...(req.requirement_products.map((p) => p.product_name)),
+  ];
+  if (tab === "forMe") {
+    const ar = req as AssignedRequirement;
+    candidates.push(ar.created_by_name);
+  }
+  return candidates.some((c) => c && fuzzyMatch(c, query));
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,7 +192,6 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
       onClick={onClick}
       className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col gap-2.5 cursor-pointer active:scale-[0.98] transition-transform"
     >
-      {/* Row 1: Type + Created date */}
       <div className="flex items-center justify-between">
         <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-blue-500"}`}>
           {TYPE_LABELS[req.type] ?? req.type}
@@ -166,10 +199,8 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
         <span className="text-xs text-gray-400">{formatDate(req.created_at)}</span>
       </div>
 
-      {/* Row 2: Title */}
       <p className="text-base font-semibold text-gray-900 leading-snug">{title}</p>
 
-      {/* Row 3: Status + Days left */}
       <div className="flex items-center gap-2 flex-wrap">
         <span
           className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -181,7 +212,6 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
         <DaysLeftBadge expiry={req.expiry_date} />
       </div>
 
-      {/* Row 4: Assignee (not DRAFT; "DS Lead" fallback only for OPEN with no assignee) */}
       {req.status !== "DRAFT" && (req.assignee?.name || req.status === "OPEN") && (
         <div className="flex items-center gap-1.5 text-xs text-gray-400">
           <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24"
@@ -193,7 +223,6 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
         </div>
       )}
 
-      {/* Row 5: Remarks / Qty (only if present) */}
       {(req.remarks || qtyNote) && (
         <p className="text-xs text-gray-500 leading-snug line-clamp-2">
           {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
@@ -229,7 +258,6 @@ function AssignedRequirementCard({
       onClick={onClick}
       className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col gap-2.5 cursor-pointer active:scale-[0.98] transition-transform"
     >
-      {/* Row 1: Type + Created date */}
       <div className="flex items-center justify-between">
         <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-blue-500"}`}>
           {TYPE_LABELS[req.type] ?? req.type}
@@ -237,10 +265,8 @@ function AssignedRequirementCard({
         <span className="text-xs text-gray-400">{formatDate(req.created_at)}</span>
       </div>
 
-      {/* Row 2: Title */}
       <p className="text-base font-semibold text-gray-900 leading-snug">{title}</p>
 
-      {/* Row 3: Status + Days left */}
       <div className="flex items-center gap-2 flex-wrap">
         <span
           className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -252,7 +278,6 @@ function AssignedRequirementCard({
         <DaysLeftBadge expiry={req.expiry_date} />
       </div>
 
-      {/* Row 4: Creator name + darkstore */}
       {creatorLine && (
         <div className="flex items-center gap-1.5 text-xs text-gray-400">
           <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24"
@@ -264,7 +289,6 @@ function AssignedRequirementCard({
         </div>
       )}
 
-      {/* Row 5: Remarks / Qty (only if present) */}
       {(req.remarks || qtyNote) && (
         <p className="text-xs text-gray-500 leading-snug line-clamp-2">
           {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
@@ -290,8 +314,8 @@ function TabBar({
   onSwitch: (tab: TabId) => void;
 }) {
   const tabs: { id: TabId; label: string; count: number }[] = [
-    { id: "byMe",   label: "Requirements by me", count: byMeCount },
-    { id: "forMe",  label: "Req for me",          count: forMeCount },
+    { id: "byMe",  label: "Requirements by me", count: byMeCount },
+    { id: "forMe", label: "Req for me",          count: forMeCount },
   ];
 
   return (
@@ -327,54 +351,303 @@ function TabBar({
   );
 }
 
-// ─── Filter / Sort Bar ────────────────────────────────────────────────────────
+// ─── Label Filter Bottom Sheet ────────────────────────────────────────────────
 
-function FilterBar({
+function LabelFilterSheet({
+  labels,
+  activeLabel,
+  onSelect,
+  onClose,
+}: {
+  labels: string[];
+  activeLabel: string | null;
+  onSelect: (label: string | null) => void;
+  onClose: () => void;
+}) {
+  const [localSearch, setLocalSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Focus search on open
+    const t = setTimeout(() => inputRef.current?.focus(), 80);
+    return () => clearTimeout(t);
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!localSearch.trim()) return labels;
+    return labels.filter((l) => fuzzyMatch(l, localSearch));
+  }, [labels, localSearch]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      {/* Sheet */}
+      <div className="relative bg-white rounded-t-2xl max-w-md mx-auto w-full max-h-[70vh] flex flex-col animate-slide-up">
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-gray-300" />
+        </div>
+
+        {/* Title row */}
+        <div className="flex items-center justify-between px-4 pt-1 pb-3 shrink-0">
+          <h3 className="text-base font-semibold text-gray-900">Filter by Label</h3>
+          {activeLabel && (
+            <button
+              onClick={() => { onSelect(null); onClose(); }}
+              className="text-xs text-blue-600 font-medium"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Search inside sheet */}
+        <div className="px-4 pb-3 shrink-0">
+          <div className="relative">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round"
+                    d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              ref={inputRef}
+              type="text"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              placeholder="Search labels…"
+              className="w-full pl-9 pr-8 py-2 text-sm bg-gray-100 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {localSearch && (
+              <button
+                onClick={() => setLocalSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Label list */}
+        <ul className="overflow-y-auto flex-1 px-4 pb-6">
+          {filtered.length === 0 ? (
+            <li className="text-sm text-gray-400 text-center py-8">No labels found</li>
+          ) : (
+            filtered.map((label) => (
+              <li key={label}>
+                <button
+                  onClick={() => { onSelect(label === activeLabel ? null : label); onClose(); }}
+                  className={`w-full text-left px-3 py-3 rounded-xl text-sm flex items-center justify-between transition-colors ${
+                    activeLabel === label
+                      ? "bg-blue-50 text-blue-700 font-medium"
+                      : "text-gray-800 hover:bg-gray-50"
+                  }`}
+                >
+                  <span>{label}</span>
+                  {activeLabel === label && (
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24"
+                         stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sort Bottom Sheet ────────────────────────────────────────────────────────
+
+function SortSheet({
+  sort,
+  onSelect,
+  onClose,
+}: {
+  sort: SortOption;
+  onSelect: (s: SortOption) => void;
+  onClose: () => void;
+}) {
+  const options: { value: SortOption; label: string; desc: string }[] = [
+    { value: "created_desc", label: "Latest created",       desc: "Newest requirements first" },
+    { value: "deadline_asc", label: "Deadline approaching", desc: "Soonest expiry first" },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <div className="relative bg-white rounded-t-2xl max-w-md mx-auto w-full animate-slide-up">
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full bg-gray-300" />
+        </div>
+
+        <div className="px-4 pt-1 pb-2">
+          <h3 className="text-base font-semibold text-gray-900">Sort by</h3>
+        </div>
+
+        <ul className="px-4 pb-6 flex flex-col gap-1">
+          {options.map((opt) => (
+            <li key={opt.value}>
+              <button
+                onClick={() => { onSelect(opt.value); onClose(); }}
+                className={`w-full text-left px-3 py-3.5 rounded-xl flex items-center justify-between transition-colors ${
+                  sort === opt.value
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-gray-800 hover:bg-gray-50"
+                }`}
+              >
+                <div>
+                  <p className={`text-sm font-medium ${sort === opt.value ? "text-blue-700" : "text-gray-900"}`}>
+                    {opt.label}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
+                </div>
+                {sort === opt.value && (
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24"
+                       stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ─── Search + Filter Bar ──────────────────────────────────────────────────────
+
+function SearchFilterBar({
+  searchQuery,
+  onSearchChange,
+  activeLabel,
+  labelCount,
+  sort,
+  onLabelClick,
+  onSortClick,
+}: {
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
+  activeLabel: string | null;
+  labelCount: number;
+  sort: SortOption;
+  onLabelClick: () => void;
+  onSortClick: () => void;
+}) {
+  const sortLabels: Record<SortOption, string> = {
+    created_desc: "Latest",
+    deadline_asc: "Deadline",
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* Search input — grows */}
+      <div className="relative flex-1 min-w-0">
+        <svg
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round"
+                d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+        </svg>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search requirements…"
+          className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => onSearchChange("")}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Label filter CTA */}
+      <button
+        onClick={onLabelClick}
+        className={`shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl border text-xs font-medium transition-colors ${
+          activeLabel
+            ? "bg-blue-600 text-white border-blue-600"
+            : "bg-white text-gray-600 border-gray-200"
+        }`}
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round"
+                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+        </svg>
+        <span className="max-w-[64px] truncate">{activeLabel ?? "Label"}</span>
+        {labelCount > 0 && !activeLabel && (
+          <span className="text-[10px] text-gray-400">{labelCount}</span>
+        )}
+      </button>
+
+      {/* Sort CTA */}
+      <button
+        onClick={onSortClick}
+        className="shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-medium text-gray-600 transition-colors hover:border-gray-300"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+        </svg>
+        <span>{sortLabels[sort]}</span>
+      </button>
+    </div>
+  );
+}
+
+// ─── Filter Pills ─────────────────────────────────────────────────────────────
+
+function FilterPills({
   activeTab,
   activeFilter,
-  sort,
   onFilterChange,
-  onSortChange,
 }: {
   activeTab: TabId;
   activeFilter: FilterKey;
-  sort: SortOption;
   onFilterChange: (f: FilterKey) => void;
-  onSortChange: (s: SortOption) => void;
 }) {
   const filters = activeTab === "byMe" ? BY_ME_FILTERS : FOR_ME_FILTERS;
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Filter chips */}
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
-        {filters.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => onFilterChange(key)}
-            className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
-              activeFilter === key
-                ? "bg-gray-900 text-white border-gray-900"
-                : "bg-white text-gray-600 border-gray-200"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Sort select */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-400 shrink-0">Sort by</span>
-        <select
-          value={sort}
-          onChange={(e) => onSortChange(e.target.value as SortOption)}
-          className="flex-1 text-xs bg-white border border-gray-200 rounded-xl px-3 py-1.5 text-gray-700 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
+      {filters.map(({ key, label }) => (
+        <button
+          key={key}
+          onClick={() => onFilterChange(key)}
+          className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+            activeFilter === key
+              ? "bg-gray-900 text-white border-gray-900"
+              : "bg-white text-gray-600 border-gray-200"
+          }`}
         >
-          <option value="deadline_asc">Deadline approaching</option>
-          <option value="created_desc">Latest created</option>
-        </select>
-      </div>
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -386,21 +659,22 @@ function HomeContent() {
   const router = useRouter();
   const userId = Number(searchParams.get("userId") ?? 0);
 
-  // Defer all search-param-dependent rendering to after mount to prevent hydration mismatch.
-  // The server has no access to URL params; the client does — so we show the skeleton until mounted.
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  const [requirements, setRequirements]             = useState<Requirement[]>([]);
-  const [loading, setLoading]                       = useState(false);
-  const [assignedRequirements, setAssignedReqs]     = useState<AssignedRequirement[]>([]);
-  const [assignedLoading, setAssignedLoading]       = useState(false);
-  const [userRole, setUserRole]                     = useState<string | null>(null);
-  const [formOpen, setFormOpen]                     = useState(false);
-  const [activeFilter, setActiveFilter]             = useState<FilterKey>("all_open");
-  const [sort, setSort]                             = useState<SortOption>("created_desc");
+  const [requirements, setRequirements]         = useState<Requirement[]>([]);
+  const [loading, setLoading]                   = useState(false);
+  const [assignedRequirements, setAssignedReqs] = useState<AssignedRequirement[]>([]);
+  const [assignedLoading, setAssignedLoading]   = useState(false);
+  const [userRole, setUserRole]                 = useState<string | null>(null);
+  const [formOpen, setFormOpen]                 = useState(false);
+  const [activeFilter, setActiveFilter]         = useState<FilterKey>("all_open");
+  const [sort, setSort]                         = useState<SortOption>("created_desc");
+  const [searchQuery, setSearchQuery]           = useState("");
+  const [activeLabel, setActiveLabel]           = useState<string | null>(null);
+  const [labelSheetOpen, setLabelSheetOpen]     = useState(false);
+  const [sortSheetOpen, setSortSheetOpen]       = useState(false);
 
-  // Derive active tab from URL param + role (not a state var — avoids double-render)
   const tabParam = searchParams.get("tab") as TabId | null;
   const defaultTab: TabId = userRole === "bijnisTrader" ? "byMe" : "forMe";
   const activeTab: TabId  = (tabParam === "byMe" || tabParam === "forMe") ? tabParam : defaultTab;
@@ -440,10 +714,12 @@ function HomeContent() {
   function switchTab(tab: TabId) {
     setActiveFilter("all_open");
     setSort("created_desc");
+    setSearchQuery("");
+    setActiveLabel(null);
     router.replace(`/?userId=${userId}&tab=${tab}`);
   }
 
-  // Badge counts — exclude DRAFT and COMPLETED
+  // Raw badge counts — always unfiltered
   const byMeBadgeCount = useMemo(
     () => requirements.filter((r) => !EXCLUDED_FOR_COUNT.has(r.status)).length,
     [requirements]
@@ -453,23 +729,31 @@ function HomeContent() {
     [assignedRequirements]
   );
 
+  // All unique labels for the active tab (sourced from full tab data, not filtered)
+  const allLabels = useMemo(() => {
+    const source: Requirement[] =
+      activeTab === "byMe" ? requirements : (assignedRequirements as Requirement[]);
+    const set = new Set<string>();
+    for (const r of source) {
+      if (r.label_name) set.add(r.label_name);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [requirements, assignedRequirements, activeTab]);
+
   const displayedRequirements = useMemo(() => {
     const source: Requirement[] =
       activeTab === "byMe" ? requirements : (assignedRequirements as Requirement[]);
 
+    // 1. Status pill filter
     let list: Requirement[];
-
     if (activeTab === "byMe") {
       if (activeFilter === "action_pending") {
         list = source.filter((r) => {
-          // Always include REVIEW_FOR_COMPLETION
           if (r.status === "REVIEW_FOR_COMPLETION") return true;
-          // For OPEN / IN_PROCESS: include only if last comment is from another user
           if (r.status === "OPEN" || r.status === "IN_PROCESS") {
             const log = r.comment_log;
             if (!log || log.length === 0) return false;
-            const lastComment = log[log.length - 1];
-            return lastComment.userId !== userId;
+            return log[log.length - 1].userId !== userId;
           }
           return false;
         });
@@ -482,6 +766,17 @@ function HomeContent() {
       list = statusSet ? source.filter((r) => statusSet.has(r.status)) : source;
     }
 
+    // 2. Label filter (AND)
+    if (activeLabel) {
+      list = list.filter((r) => r.label_name === activeLabel);
+    }
+
+    // 3. Search query (AND)
+    if (searchQuery.trim()) {
+      list = list.filter((r) => requirementMatchesSearch(r, searchQuery, activeTab));
+    }
+
+    // 4. Sort
     if (sort === "deadline_asc") {
       list = [...list].sort((a, b) => {
         if (!a.expiry_date && !b.expiry_date) return 0;
@@ -496,11 +791,13 @@ function HomeContent() {
     }
 
     return list;
-  }, [requirements, assignedRequirements, activeTab, activeFilter, sort, userId]);
+  }, [requirements, assignedRequirements, activeTab, activeFilter, sort, userId, searchQuery, activeLabel]);
 
   const isActiveTabLoading = activeTab === "byMe" ? loading : assignedLoading;
 
   if (!mounted) return <HomeSkeleton />;
+
+  const hasActiveSecondaryFilter = searchQuery.trim() || activeLabel;
 
   return (
     <>
@@ -537,12 +834,22 @@ function HomeContent() {
               onSwitch={switchTab}
             />
 
-            <FilterBar
+            {/* Search + Label + Sort row */}
+            <SearchFilterBar
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              activeLabel={activeLabel}
+              labelCount={allLabels.length}
+              sort={sort}
+              onLabelClick={() => setLabelSheetOpen(true)}
+              onSortClick={() => setSortSheetOpen(true)}
+            />
+
+            {/* Status filter pills */}
+            <FilterPills
               activeTab={activeTab}
               activeFilter={activeFilter}
-              sort={sort}
               onFilterChange={setActiveFilter}
-              onSortChange={setSort}
             />
 
             {isActiveTabLoading ? (
@@ -553,13 +860,15 @@ function HomeContent() {
               </div>
             ) : displayedRequirements.length === 0 ? (
               <div className="text-center text-gray-400 py-16 text-sm">
-                {activeTab === "byMe"
-                  ? (requirements.length === 0
-                      ? "No requirements yet. Create your first one!"
-                      : "No requirements match this filter.")
-                  : (assignedRequirements.length === 0
-                      ? "No requirements assigned to you."
-                      : "No requirements match this filter.")}
+                {hasActiveSecondaryFilter
+                  ? "No requirements match your search."
+                  : activeTab === "byMe"
+                    ? (requirements.length === 0
+                        ? "No requirements yet. Create your first one!"
+                        : "No requirements match this filter.")
+                    : (assignedRequirements.length === 0
+                        ? "No requirements assigned to you."
+                        : "No requirements match this filter.")}
               </div>
             ) : (
               <ul className="flex flex-col gap-3">
@@ -594,6 +903,25 @@ function HomeContent() {
         onClose={() => setFormOpen(false)}
         onSubmitSuccess={fetchAllData}
       />
+
+      {/* Label filter bottom sheet */}
+      {labelSheetOpen && (
+        <LabelFilterSheet
+          labels={allLabels}
+          activeLabel={activeLabel}
+          onSelect={setActiveLabel}
+          onClose={() => setLabelSheetOpen(false)}
+        />
+      )}
+
+      {/* Sort bottom sheet */}
+      {sortSheetOpen && (
+        <SortSheet
+          sort={sort}
+          onSelect={setSort}
+          onClose={() => setSortSheetOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -613,10 +941,16 @@ function HomeSkeleton() {
             <div className="flex-1 h-9 rounded-xl bg-gray-200 animate-pulse" />
             <div className="flex-1 h-9 rounded-xl bg-gray-200 animate-pulse" />
           </div>
+          {/* Search + CTA row skeleton */}
+          <div className="flex gap-2">
+            <div className="flex-1 h-9 rounded-xl bg-gray-200 animate-pulse" />
+            <div className="w-20 h-9 rounded-xl bg-gray-200 animate-pulse" />
+            <div className="w-16 h-9 rounded-xl bg-gray-200 animate-pulse" />
+          </div>
           {/* Filter chips */}
           <div className="flex gap-2 overflow-hidden">
-            {[80, 60, 100, 72].map((w, i) => (
-              <div key={i} className={`h-7 rounded-full bg-gray-200 animate-pulse shrink-0`} style={{ width: w }} />
+            {[80, 60, 100].map((w, i) => (
+              <div key={i} className="h-7 rounded-full bg-gray-200 animate-pulse shrink-0" style={{ width: w }} />
             ))}
           </div>
           {/* Cards */}

@@ -3,3 +3,21 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.22s ease-out;
+}
+
+/* Hide scrollbars on filter pill rows */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
