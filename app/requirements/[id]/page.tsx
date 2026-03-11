@@ -17,6 +17,14 @@ interface CommentEntry {
   name: string;
   date: string;
   comment: string;
+  isSystemUpdate?: boolean;
+}
+
+interface StatusUpdateEntry {
+  id:          string;
+  change_type: string;
+  message:     string;
+  changed_at:  string;
 }
 
 interface Attachment {
@@ -152,6 +160,23 @@ function flattenComments(raw: (CommentEntry | CommentEntry[])[]): CommentEntry[]
       typeof c === "object" &&
       typeof (c as CommentEntry).comment === "string" &&
       typeof (c as CommentEntry).date === "string"
+  );
+}
+
+/** Merge user comments with system status updates, sorted chronologically */
+function mergeWithStatusUpdates(
+  comments: CommentEntry[],
+  statusUpdates: StatusUpdateEntry[],
+): CommentEntry[] {
+  const systemEntries: CommentEntry[] = statusUpdates.map((s) => ({
+    userId:         -1,
+    name:           "System Update",
+    date:           s.changed_at,
+    comment:        s.message,
+    isSystemUpdate: true,
+  }));
+  return [...comments, ...systemEntries].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 }
 
@@ -804,6 +829,20 @@ function AttachmentsSection({ attachments }: { attachments: Attachment[] }) {
 
 function ChatBubble({ entry, isMine }: { entry: CommentEntry; isMine: boolean }) {
   const timeStr = formatDateTime(entry.date);
+
+  if (entry.isSystemUpdate) {
+    return (
+      <div className="self-center flex flex-col items-center gap-0.5 max-w-[90%]">
+        <div className="px-3 py-1.5 rounded-full bg-gray-100 border border-gray-200 text-xs text-gray-500 text-center leading-snug">
+          {entry.comment}
+        </div>
+        {timeStr && (
+          <span className="text-[10px] text-gray-400">{timeStr}</span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`flex flex-col gap-0.5 max-w-[80%] ${isMine ? "self-end items-end" : "self-start items-start"}`}>
       {!isMine && (
@@ -983,10 +1022,11 @@ function DetailContent() {
   const router       = useRouter();
   const userId       = Number(searchParams.get("userId") ?? 0);
 
-  const [req, setReq]                   = useState<Requirement | null>(null);
-  const [userName, setUserName]         = useState<string>("");
-  const [userRole, setUserRole]         = useState<string>("");
-  const [assignedUser, setAssignedUser] = useState<AssignedUser | null>(null);
+  const [req, setReq]                             = useState<Requirement | null>(null);
+  const [statusUpdates, setStatusUpdates]         = useState<StatusUpdateEntry[]>([]);
+  const [userName, setUserName]                   = useState<string>("");
+  const [userRole, setUserRole]                   = useState<string>("");
+  const [assignedUser, setAssignedUser]           = useState<AssignedUser | null>(null);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const [activeTab, setActiveTab]       = useState<"requirement" | "chat">("requirement");
@@ -1006,6 +1046,7 @@ function DetailContent() {
       const reqJson = await reqRes.json();
       const reqData: Requirement = reqJson.data;
       setReq(reqData);
+      setStatusUpdates(reqJson.status_updates ?? []);
 
       let currentUserData: { name: string; role: string } | null = null;
       if (userRes?.ok) {
@@ -1079,11 +1120,11 @@ function DetailContent() {
   const title    = req.label_name ?? req.category_name ?? "Untitled";
   const tabParam = searchParams.get("tab");
   const backUrl  = `/?userId=${userId}${tabParam ? `&tab=${tabParam}` : ""}`;
-  const comments = flattenComments(req.comment_log);
+  const comments = mergeWithStatusUpdates(flattenComments(req.comment_log), statusUpdates);
 
-  // Red dot: last comment is from someone other than the current user
-  const lastComment = comments[comments.length - 1];
-  const hasUnread   = !!lastComment && lastComment.userId !== userId;
+  // Red dot: last real (non-system) comment is from someone other than the current user
+  const lastRealComment = [...comments].reverse().find((c) => !c.isSystemUpdate);
+  const hasUnread       = !!lastRealComment && lastRealComment.userId !== userId;
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto">

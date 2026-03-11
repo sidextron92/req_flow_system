@@ -10,28 +10,91 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const { data, error } = await supabaseAdmin
-    .from("requirements")
-    .select(`
-      id, type, status,
-      label_name, label_id,
-      category_id, category_name,
-      expiry_date, remarks, qty_required,
-      attachments, comment_log,
-      created_at, updated_at,
-      assigned_to_user_id, assigned_date,
-      created_by,
-      requirement_products ( id, product_id, product_name, notes )
-    `)
-    .eq("id", id)
-    .single();
+  const [{ data, error }, { data: statusLogs, error: statusLogsError }] = await Promise.all([
+    supabaseAdmin
+      .from("requirements")
+      .select(`
+        id, type, status,
+        label_name, label_id,
+        category_id, category_name,
+        expiry_date, remarks, qty_required,
+        attachments, comment_log,
+        created_at, updated_at,
+        assigned_to_user_id, assigned_date,
+        created_by,
+        requirement_products ( id, product_id, product_name, notes )
+      `)
+      .eq("id", id)
+      .single(),
+    supabaseAdmin
+      .from("status_update_log")
+      .select("id, change_type, old_value, new_value, changed_by, changed_at")
+      .eq("requirement_id", id)
+      .order("changed_at", { ascending: true }),
+  ]);
 
   if (error) {
     const status = error.code === "PGRST116" ? 404 : 500;
     return NextResponse.json({ error: error.message }, { status });
   }
 
-  return NextResponse.json({ data });
+  if (statusLogsError) {
+    console.error("Failed to fetch status_update_log:", statusLogsError.message);
+  }
+
+  // Resolve user names for all user IDs referenced in status logs
+  let statusUpdates: StatusUpdateEntry[] = [];
+  if (statusLogs && statusLogs.length > 0) {
+    // Collect all unique user IDs: changed_by + new_value for ASSIGNMENT_CHANGE rows
+    const userIdSet = new Set<number>();
+    for (const row of statusLogs) {
+      if (row.changed_by) userIdSet.add(row.changed_by);
+      if (row.change_type === "ASSIGNMENT_CHANGE" && row.new_value) {
+        const n = Number(row.new_value);
+        if (!isNaN(n)) userIdSet.add(n);
+      }
+    }
+
+    const userIds = Array.from(userIdSet);
+    const { data: users } = await supabaseAdmin
+      .from("users")
+      .select("id, name")
+      .in("id", userIds);
+
+    const nameMap: Record<number, string> = {};
+    for (const u of users ?? []) nameMap[u.id] = u.name;
+
+    statusUpdates = statusLogs.map((row) => {
+      const changedByName = row.changed_by ? (nameMap[row.changed_by] ?? `User ${row.changed_by}`) : "System";
+      let message: string;
+      if (row.change_type === "STATUS_CHANGE") {
+        const from = row.old_value ?? "—";
+        const to   = row.new_value;
+        message = `${changedByName} changed status: ${from} → ${to}`;
+      } else if (row.change_type === "ASSIGNMENT_CHANGE") {
+        const assigneeId   = Number(row.new_value);
+        const assigneeName = !isNaN(assigneeId) ? (nameMap[assigneeId] ?? `User ${assigneeId}`) : row.new_value;
+        message = `${changedByName} assigned this to ${assigneeName}`;
+      } else {
+        message = `${changedByName} updated: ${row.old_value ?? "—"} → ${row.new_value}`;
+      }
+      return {
+        id:          row.id,
+        change_type: row.change_type,
+        message,
+        changed_at:  row.changed_at,
+      };
+    });
+  }
+
+  return NextResponse.json({ data, status_updates: statusUpdates });
+}
+
+interface StatusUpdateEntry {
+  id:          string;
+  change_type: string;
+  message:     string;
+  changed_at:  string;
 }
 
 interface Product {
