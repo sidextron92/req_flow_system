@@ -37,6 +37,10 @@ npm run lint   # ESLint
 | `lib/extraction-validation.ts` | Required fields per type; drives chat prompts |
 | `lib/requirement-type.map.ts` | UI label ↔ DB enum mapping |
 | `supabase/schema.sql` | Full DB schema — run once in Supabase SQL editor |
+| `lib/push.service.ts` | Web Push sender — `sendPushNotification(userId, payload)`; fetches subscription, sends, cleans up 410s |
+| `app/components/PushPermissionPrompt.tsx` | First-visit banner (2s delay) prompting user to enable push notifications |
+| `app/settings/page.tsx` | Settings page at `/settings?userId=<id>` — shows subscription status, device info, resubscribe |
+| `public/sw-custom.js` | Service worker push handler + notificationclick deep-link opener |
 
 ## API routes
 | Route | Method | What it does |
@@ -55,6 +59,9 @@ npm run lint   # ESLint
 | `/api/ai/fill-missing` | POST | AI fills missing fields from chat input |
 | `/api/ai/re-extract` | POST | Re-run extraction with edited system prompt |
 | `/api/brand-product/fuzzy-search` | POST | Trigram fuzzy search for brands/products |
+| `/api/push/subscribe` | GET | Returns `{ subscribed, device_info, created_at }` for a userId |
+| `/api/push/subscribe` | POST | Upserts push subscription for a user (one per user — replaces existing) |
+| `/api/push/subscribe` | DELETE | Removes push subscription for a user |
 
 ## DB schema (key tables)
 - **users** — `id BIGINT PK`, name, role, phone, darkstore_id, darkstore_name
@@ -64,6 +71,7 @@ npm run lint   # ESLint
 - **brand_product_data** — brand_name, brand_id, product_name, product_id. Has GiST trigram indexes for fuzzy search
 - **ai_extractions** — requirement_id FK, extracted_data JSONB, model_used
 - **status_update_log** — audit trail for status/assignment/field changes
+- **push_subscriptions** — `id UUID PK`, `user_id BIGINT UNIQUE FK users`, `endpoint TEXT`, `p256dh TEXT`, `auth TEXT`, `device_info TEXT` (e.g. "Chrome on Android"), `created_at`. One row per user — upserted on re-subscribe.
 - Triggers: `set_updated_at()` stamps `updated_at` BEFORE UPDATE; `log_requirement_changes()` writes to `status_update_log` AFTER UPDATE when `status` or `assigned_to_user_id` changes — reads `updated_by` as `changed_by` (NULL if not set)
 - RPCs: `fuzzy_search_brands(query, limit)`, `fuzzy_search_products(query, limit)`
 
@@ -76,7 +84,41 @@ SUPABASE_BUCKET=reqflow_images
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
 DEEPGRAM_API_KEY=
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:admin@reqflow.com
 ```
+
+## Push Notification System
+
+Web Push (VAPID) — free, no third-party service. Uses `web-push` npm package server-side.
+
+### Key constraints
+- **Service worker only active in production build** (`npm run build && npm start`). Push does NOT work in `npm run dev`.
+- **One subscription per user** — `push_subscriptions` has `UNIQUE(user_id)`. New subscribe always replaces the old one.
+- Works on Android (Chrome/Firefox) without home screen install. iOS requires home screen install.
+
+### VAPID keys
+Generated once via `npx web-push generate-vapid-keys`. Public key is `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (client-safe). Private key is `VAPID_PRIVATE_KEY` (server-only). **Never regenerate** — existing browser subscriptions will break if keys change.
+
+### Subscription flow
+1. `PushPermissionPrompt` shows a banner 2s after first page load (skipped if already subscribed or permission denied)
+2. On Allow: browser creates a push subscription → POST `/api/push/subscribe` → stored in `push_subscriptions`
+3. Settings page (`/settings?userId=<id>`) shows device info + "Resubscribe this device" for manual management
+
+### Notification triggers
+| Event | File | Notifies |
+|-------|------|---------|
+| Final save (new assignment) | `app/api/requirements/[id]/route.ts` | Assignee |
+| Status change | `app/api/requirements/[id]/status/route.ts` | Creator (when assignee acts) or Assignee (when creator acts) |
+| Reassignment | `app/api/requirements/[id]/assign/route.ts` | New assignee |
+
+All notifications are fire-and-forget (IIFE async) — failures never affect the API response.
+
+### Service worker push handler
+`public/sw-custom.js` — merged into generated service worker via `customWorkerSrc: "sw-custom.js"` in `next.config.ts`. Handles `push` event (shows notification) and `notificationclick` event (opens deep link to requirement).
+
+---
 
 ## UI conventions
 - Mobile-first, `max-w-md` centered layout

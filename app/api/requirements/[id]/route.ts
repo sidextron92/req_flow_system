@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sendPushNotification } from "@/lib/push.service";
 
 export async function GET(
   _req: NextRequest,
@@ -241,6 +242,21 @@ export async function PATCH(
   if (aiError) {
     console.error("Failed to save ai_extractions:", aiError.message);
     // Non-fatal — requirement is already updated
+  }
+
+  // Notify newly assigned user
+  if (assigneeId !== null) {
+    (async () => {
+      try {
+        await sendPushNotification(assigneeId, {
+          title: "New requirement assigned to you",
+          body: `${correctedType.replace("_", " ")} · ${label_name ?? category_name ?? "New requirement"}`,
+          url: `/requirements/${requirementId}`,
+        });
+      } catch {
+        // Notification failure must not affect the API response
+      }
+    })();
   }
 
   return NextResponse.json({ data: { id: requirementId, status: "OPEN", corrected_type: correctedType } });

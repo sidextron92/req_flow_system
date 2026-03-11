@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sendPushNotification } from "@/lib/push.service";
 
 type AllowedTransition = Record<string, string[]>;
 
@@ -80,6 +81,48 @@ export async function PATCH(
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
+
+  // Send push notification to the other party
+  (async () => {
+    try {
+      const { data: req_detail } = await supabaseAdmin
+        .from("requirements")
+        .select("label_name, created_by, assigned_to_user_id")
+        .eq("id", requirementId)
+        .single();
+
+      if (!req_detail) return;
+
+      const label = req_detail.label_name ?? "a requirement";
+
+      // Assignee acted → notify creator
+      // Creator acted → notify assignee
+      const notifyUserId = assigneeAllowed
+        ? req_detail.created_by
+        : req_detail.assigned_to_user_id;
+
+      if (!notifyUserId) return;
+
+      const messages: Record<string, { title: string; body: string }> = {
+        IN_PROCESS:            { title: "Work started", body: `Someone started working on ${label}` },
+        REVIEW_FOR_COMPLETION: { title: "Ready for review", body: `${label} is ready for your review` },
+        CANNOT_BE_DONE:        { title: "Cannot be done", body: `${label} was marked as cannot be done` },
+        COMPLETED:             { title: "Completed", body: `${label} has been marked as Completed` },
+        PARTIALLY_COMPLETE:    { title: "Partially complete", body: `${label} has been marked as Partially Complete` },
+        INCOMPLETE:            { title: "Needs rework", body: `${label} was marked as Incomplete` },
+      };
+
+      const msg = messages[newStatus];
+      if (!msg) return;
+
+      await sendPushNotification(notifyUserId, {
+        ...msg,
+        url: `/requirements/${requirementId}`,
+      });
+    } catch {
+      // Notification failure must not affect the API response
+    }
+  })();
 
   return NextResponse.json({ data: { id: requirementId, status: newStatus } });
 }

@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sendPushNotification } from "@/lib/push.service";
 
 const REASSIGN_ALLOWED_STATUSES = ["OPEN", "IN_PROCESS"];
 
@@ -127,6 +128,26 @@ export async function PATCH(
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
+
+  // Notify new assignee
+  (async () => {
+    try {
+      const { data: req_detail } = await supabaseAdmin
+        .from("requirements")
+        .select("label_name")
+        .eq("id", requirementId)
+        .single();
+
+      const label = req_detail?.label_name ?? "a requirement";
+      await sendPushNotification(newAssigneeIdNum, {
+        title: "Requirement reassigned to you",
+        body: label,
+        url: `/requirements/${requirementId}`,
+      });
+    } catch {
+      // Notification failure must not affect the API response
+    }
+  })();
 
   return NextResponse.json({
     data: {
