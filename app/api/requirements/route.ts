@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
       category_id, category_name, expiry_date,
       remarks, attachments, comment_log, created_at, updated_at,
       assigned_to_user_id, assigned_date,
+      assignee:users!requirements_assigned_to_user_id_fkey ( name ),
       requirement_products ( id, product_id, product_name, notes )
     `)
     .eq("created_by", userId)
