@@ -40,7 +40,7 @@ npm run lint   # ESLint
 | `lib/push.service.ts` | Web Push sender — `sendPushNotification(userId, payload)`; fetches subscription, sends, cleans up 410s |
 | `app/components/PushPermissionPrompt.tsx` | First-visit banner (2s delay) prompting user to enable push notifications |
 | `app/settings/page.tsx` | Settings page at `/settings?userId=<id>` — shows subscription status, device info, resubscribe |
-| `public/sw-custom.js` | Service worker push handler + notificationclick deep-link opener |
+| `worker/index.js` | Service worker push handler + notificationclick deep-link opener — compiled by next-pwa and injected via `importScripts` into `sw.js` |
 
 ## API routes
 | Route | Method | What it does |
@@ -116,7 +116,12 @@ Generated once via `npx web-push generate-vapid-keys`. Public key is `NEXT_PUBLI
 All notifications are fire-and-forget (IIFE async) — failures never affect the API response.
 
 ### Service worker push handler
-`public/sw-custom.js` — merged into generated service worker via `customWorkerSrc: "sw-custom.js"` in `next.config.ts`. Handles `push` event (shows notification) and `notificationclick` event (opens deep link to requirement).
+`worker/index.js` — next-pwa compiles this directory (default `customWorkerSrc`) and injects the output via `importScripts` into the generated `sw.js`. Handles `push` event (shows notification) and `notificationclick` event (opens deep link to requirement).
+
+**Important:** `customWorkerSrc` expects a **directory** containing `index.js` or `index.ts`, not a filename. A file placed directly in `public/` is only precached as a static asset and never executed as SW code.
+
+### Resubscribe behaviour
+"Resubscribe this device" in Settings first calls `existing.unsubscribe()` on the current browser subscription before re-subscribing. This forces the browser to generate a new endpoint — without this, the browser returns the cached subscription and the DB upsert sees no change (so `created_at` stays stale).
 
 ---
 
