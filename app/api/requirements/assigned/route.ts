@@ -1,6 +1,6 @@
 // GET /api/requirements/assigned?userId=X
 // Returns requirements assigned to the given user,
-// excluding DRAFT and COMPLETED statuses.
+// excluding DRAFT status only (COMPLETED is included for "Req for me" closed filter).
 // Includes creator info (name, darkstore_name) via users FK join.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -17,14 +17,13 @@ export async function GET(req: NextRequest) {
     .select(`
       id, type, status, label_name, label_id,
       category_id, category_name, expiry_date,
-      remarks, attachments, created_at, updated_at,
+      remarks, attachments, comment_log, created_at, updated_at,
       assigned_to_user_id, assigned_date, created_by,
       requirement_products ( id, product_id, product_name, notes ),
       creator:users!requirements_created_by_fkey ( name, darkstore_name )
     `)
     .eq("assigned_to_user_id", userId)
     .neq("status", "DRAFT")
-    .neq("status", "COMPLETED")
     .order("created_at", { ascending: false });
 
   if (error) {

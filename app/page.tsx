@@ -11,6 +11,14 @@ interface RequirementProduct {
   notes: string | null;
 }
 
+interface CommentEntry {
+  userId: number;
+  name: string;
+  date: string;
+  comment: string;
+  isSystemUpdate?: boolean;
+}
+
 interface Requirement {
   id: string;
   type: string;
@@ -20,6 +28,7 @@ interface Requirement {
   expiry_date: string | null;
   remarks: string | null;
   created_at: string;
+  comment_log: CommentEntry[] | null;
   requirement_products: RequirementProduct[];
 }
 
@@ -52,12 +61,40 @@ const TYPE_COLORS: Record<string, string> = {
   NEW_VARIETY: "text-violet-600",
 };
 
-const ALL_STATUSES = [
-  "DRAFT", "OPEN", "IN_PROCESS",
-  "REVIEW_FOR_COMPLETION", "COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE",
+const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED"]);
+
+// ─── Filter definitions ────────────────────────────────────────────────────────
+
+type FilterKey = string; // named filter keys per tab
+
+interface FilterDef {
+  key: FilterKey;
+  label: string;
+}
+
+const BY_ME_FILTERS: FilterDef[] = [
+  { key: "all_open",       label: "All Open" },
+  { key: "action_pending", label: "Action Pending" },
+  { key: "closed",         label: "Closed" },
 ];
 
-const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED"]);
+const FOR_ME_FILTERS: FilterDef[] = [
+  { key: "all_open",  label: "All Open" },
+  { key: "follow_up", label: "Follow Up" },
+  { key: "closed",    label: "Closed" },
+];
+
+const BY_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
+  all_open: new Set(["DRAFT", "OPEN", "IN_PROCESS", "REVIEW_FOR_COMPLETION"]),
+  closed:   new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]),
+  // action_pending handled separately (needs comment_log inspection)
+};
+
+const FOR_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
+  all_open:  new Set(["OPEN", "IN_PROCESS"]),
+  follow_up: new Set(["REVIEW_FOR_COMPLETION"]),
+  closed:    new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]),
+};
 
 type SortOption = "deadline_asc" | "created_desc";
 
@@ -279,41 +316,35 @@ function TabBar({
 // ─── Filter / Sort Bar ────────────────────────────────────────────────────────
 
 function FilterBar({
-  activeStatus,
+  activeTab,
+  activeFilter,
   sort,
-  onStatusChange,
+  onFilterChange,
   onSortChange,
 }: {
-  activeStatus: string | null;
+  activeTab: TabId;
+  activeFilter: FilterKey;
   sort: SortOption;
-  onStatusChange: (s: string | null) => void;
+  onFilterChange: (f: FilterKey) => void;
   onSortChange: (s: SortOption) => void;
 }) {
+  const filters = activeTab === "byMe" ? BY_ME_FILTERS : FOR_ME_FILTERS;
+
   return (
     <div className="flex flex-col gap-2">
-      {/* Status chips */}
+      {/* Filter chips */}
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
-        <button
-          onClick={() => onStatusChange(null)}
-          className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
-            activeStatus === null
-              ? "bg-gray-900 text-white border-gray-900"
-              : "bg-white text-gray-600 border-gray-200"
-          }`}
-        >
-          All
-        </button>
-        {ALL_STATUSES.map((s) => (
+        {filters.map(({ key, label }) => (
           <button
-            key={s}
-            onClick={() => onStatusChange(s === activeStatus ? null : s)}
+            key={key}
+            onClick={() => onFilterChange(key)}
             className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
-              activeStatus === s
+              activeFilter === key
                 ? "bg-gray-900 text-white border-gray-900"
                 : "bg-white text-gray-600 border-gray-200"
             }`}
           >
-            {s.replace(/_/g, " ")}
+            {label}
           </button>
         ))}
       </div>
@@ -352,7 +383,7 @@ function HomeContent() {
   const [assignedLoading, setAssignedLoading]       = useState(false);
   const [userRole, setUserRole]                     = useState<string | null>(null);
   const [formOpen, setFormOpen]                     = useState(false);
-  const [activeStatus, setActiveStatus]             = useState<string | null>(null);
+  const [activeFilter, setActiveFilter]             = useState<FilterKey>("all_open");
   const [sort, setSort]                             = useState<SortOption>("created_desc");
 
   // Derive active tab from URL param + role (not a state var — avoids double-render)
@@ -393,7 +424,7 @@ function HomeContent() {
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
 
   function switchTab(tab: TabId) {
-    setActiveStatus(null);
+    setActiveFilter("all_open");
     setSort("created_desc");
     router.replace(`/?userId=${userId}&tab=${tab}`);
   }
@@ -403,16 +434,39 @@ function HomeContent() {
     () => requirements.filter((r) => !EXCLUDED_FOR_COUNT.has(r.status)).length,
     [requirements]
   );
-  // assignedRequirements already excludes DRAFT/COMPLETED at the API level
-  const forMeBadgeCount = assignedRequirements.length;
+  const forMeBadgeCount = useMemo(
+    () => assignedRequirements.filter((r) => !EXCLUDED_FOR_COUNT.has(r.status)).length,
+    [assignedRequirements]
+  );
 
   const displayedRequirements = useMemo(() => {
     const source: Requirement[] =
       activeTab === "byMe" ? requirements : (assignedRequirements as Requirement[]);
 
-    let list = activeStatus
-      ? source.filter((r) => r.status === activeStatus)
-      : source;
+    let list: Requirement[];
+
+    if (activeTab === "byMe") {
+      if (activeFilter === "action_pending") {
+        list = source.filter((r) => {
+          // Always include REVIEW_FOR_COMPLETION
+          if (r.status === "REVIEW_FOR_COMPLETION") return true;
+          // For OPEN / IN_PROCESS: include only if last comment is from another user
+          if (r.status === "OPEN" || r.status === "IN_PROCESS") {
+            const log = r.comment_log;
+            if (!log || log.length === 0) return false;
+            const lastComment = log[log.length - 1];
+            return lastComment.userId !== userId;
+          }
+          return false;
+        });
+      } else {
+        const statusSet = BY_ME_STATUS_SETS[activeFilter];
+        list = statusSet ? source.filter((r) => statusSet.has(r.status)) : source;
+      }
+    } else {
+      const statusSet = FOR_ME_STATUS_SETS[activeFilter];
+      list = statusSet ? source.filter((r) => statusSet.has(r.status)) : source;
+    }
 
     if (sort === "deadline_asc") {
       list = [...list].sort((a, b) => {
@@ -428,7 +482,7 @@ function HomeContent() {
     }
 
     return list;
-  }, [requirements, assignedRequirements, activeTab, activeStatus, sort]);
+  }, [requirements, assignedRequirements, activeTab, activeFilter, sort, userId]);
 
   const isActiveTabLoading = activeTab === "byMe" ? loading : assignedLoading;
 
@@ -470,9 +524,10 @@ function HomeContent() {
             />
 
             <FilterBar
-              activeStatus={activeStatus}
+              activeTab={activeTab}
+              activeFilter={activeFilter}
               sort={sort}
-              onStatusChange={setActiveStatus}
+              onFilterChange={setActiveFilter}
               onSortChange={setSort}
             />
 

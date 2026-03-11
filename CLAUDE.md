@@ -43,7 +43,7 @@ npm run lint   # ESLint
 |-------|--------|-------------|
 | `/api/requirements` | GET | List requirements for a user |
 | `/api/requirements` | POST | Create requirement + upload files + run AI extraction |
-| `/api/requirements/assigned` | GET | Requirements assigned to a user (excludes DRAFT/COMPLETED); includes creator name + darkstore_name |
+| `/api/requirements/assigned` | GET | Requirements assigned to a user (excludes DRAFT only; COMPLETED included); includes creator name + darkstore_name; also returns `comment_log` |
 | `/api/requirements/[id]` | GET | Single requirement with products |
 | `/api/requirements/[id]` | PATCH | Save final extraction → status OPEN |
 | `/api/requirements/[id]/status` | PATCH | Role-gated status transition; validates role + transition, writes audit log |
@@ -199,8 +199,20 @@ Priority order:
 When an assignment is resolved, `assigned_date` is also set to `NOW()`.
 `bijnis_buyer_id` and `supply_tl_id` are validated with `!isNaN(Number(id))` before casting to BIGINT, so non-numeric values from dirty catalog data are safely ignored.
 
-#### 5.2 DB writes (in order)
-1. `UPDATE requirements` — sets all fields + `status = OPEN` + `assigned_to_user_id` + `assigned_date`.
+#### 5.2 Requirement type correction (`resolveType`) — runs after `resolveAssignee`
+
+The user-selected type is **overridden** based on catalog match results:
+
+| Condition | Corrected type |
+|-----------|----------------|
+| Any product in `products[]` has a non-null `product_id` | `RESTOCK` |
+| No product match, but `label_id` is set | `NEW_VARIETY` |
+| Neither `product_id` nor `label_id` found | `NEW_LABEL` |
+
+The corrected type is written to `requirements.type` in the UPDATE. The PATCH response always includes `corrected_type` in `data`. If the client detects `corrected_type !== original type`, it shows an amber info banner on the success screen (auto-dismisses after 4 s).
+
+#### 5.3 DB writes (in order)
+1. `UPDATE requirements` — sets all fields + `type` (corrected) + `status = OPEN` + `assigned_to_user_id` + `assigned_date`.
 2. `DELETE + INSERT requirement_products` — replaces all product rows for the requirement.
 3. `INSERT ai_extractions` — archives the full extracted JSON (non-fatal if this fails).
 
@@ -349,6 +361,42 @@ Every status change fires the `log_requirement_changes()` trigger which inserts 
 | `app/requirements/[id]/page.tsx` | `ReassignSheet`, `Toast` components; `CollapsibleOverview` reassign trigger; `handleReassignSuccess` |
 | `app/api/requirements/[id]/assign/route.ts` | `PATCH` handler; permission + validation logic |
 | `app/api/users/bijnisBuyers/route.ts` | `GET` handler; returns all bijnisBuyer users |
+
+---
+
+### Step 8 — Home page filter pills (`app/page.tsx`)
+
+The home page has two tabs: **Requirements by me** (`byMe`) and **Req for me** (`forMe`). Each tab has its own set of named filter pills. Switching tabs resets the active filter to **All Open**.
+
+Filter state is a `FilterKey` string (not a raw status value). Filtering logic lives in `displayedRequirements` useMemo.
+
+#### 8.1 "Requirements by me" filters
+
+| Filter | Label | Statuses / Logic |
+|--------|-------|-----------------|
+| `all_open` | All Open | DRAFT, OPEN, IN_PROCESS, REVIEW_FOR_COMPLETION |
+| `action_pending` | Action Pending | REVIEW_FOR_COMPLETION always; plus OPEN/IN_PROCESS only when `comment_log` is non-empty and the last comment's `userId ≠ currentUserId` |
+| `closed` | Closed | COMPLETED, INCOMPLETE, PARTIALLY_COMPLETE, CANNOT_BE_DONE |
+
+**Action Pending detail:** For OPEN/IN_PROCESS requirements, the condition is: at least one comment exists AND the last entry in `comment_log[]` has `userId !== currentUserId`. Requirements with an empty `comment_log` are excluded from this filter even if their status is OPEN or IN_PROCESS.
+
+#### 8.2 "Req for me" filters
+
+| Filter | Label | Statuses |
+|--------|-------|---------|
+| `all_open` | All Open | OPEN, IN_PROCESS |
+| `follow_up` | Follow Up | REVIEW_FOR_COMPLETION (assignee tracking items they've submitted, awaiting creator closure) |
+| `closed` | Closed | COMPLETED, INCOMPLETE, PARTIALLY_COMPLETE, CANNOT_BE_DONE |
+
+#### 8.3 Data requirements
+- Both `GET /api/requirements` (byMe) and `GET /api/requirements/assigned` (forMe) now return `comment_log` in the select.
+- `GET /api/requirements/assigned` excludes DRAFT but **includes COMPLETED** (needed for the Closed filter).
+- Tab badge counts exclude both DRAFT and COMPLETED regardless.
+
+#### 8.4 Key constants (`app/page.tsx`)
+- `BY_ME_FILTERS` / `FOR_ME_FILTERS` — ordered filter definitions `{ key, label }[]`
+- `BY_ME_STATUS_SETS` / `FOR_ME_STATUS_SETS` — `Record<FilterKey, Set<string>>` for simple status-based filters
+- `action_pending` is handled with custom logic (not in `BY_ME_STATUS_SETS`)
 
 ---
 

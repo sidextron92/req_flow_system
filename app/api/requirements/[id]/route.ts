@@ -103,8 +103,11 @@ interface Product {
   notes?: string | null;
 }
 
+type RequirementType = "RESTOCK" | "NEW_VARIETY" | "NEW_LABEL";
+
 interface PatchBody {
   userId?: string | null;           // who triggered the save
+  type?: RequirementType | null;    // user-selected type (may be corrected server-side)
   label_name?: string | null;
   label_id?: string | null;
   category_name?: string | null;
@@ -116,6 +119,20 @@ interface PatchBody {
   supply_tl_id?: string | null;     // from fuzzy-match brand result
   extracted_data: Record<string, unknown>;  // full AI JSON to save
   model_used: string;
+}
+
+// ── Requirement type correction rule ──────────────────────────
+// product_id found → RESTOCK
+// label_id found (no product_id) → NEW_VARIETY
+// neither found → NEW_LABEL
+function resolveType(
+  products: Product[] | undefined,
+  label_id: string | null | undefined,
+): RequirementType {
+  const hasProductId = products?.some((p) => p.product_id);
+  if (hasProductId) return "RESTOCK";
+  if (label_id) return "NEW_VARIETY";
+  return "NEW_LABEL";
 }
 
 // ── Rule engine: resolve assigned_to_user_id before saving ────
@@ -156,9 +173,13 @@ export async function PATCH(
   // ── 1. Resolve assignee via rule engine ────────────────────
   const assigneeId = resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id);
 
-  // ── 2. Update requirements row ─────────────────────────────
+  // ── 2. Correct requirement type based on catalog matches ───
+  const correctedType = resolveType(products, label_id);
+
+  // ── 3. Update requirements row ─────────────────────────────
   const updatePayload: Record<string, unknown> = {
-    status: "OPEN",
+    type:       correctedType,
+    status:     "OPEN",
     updated_by: userId ? parseInt(userId, 10) : null,
   };
   if (label_name    !== undefined) updatePayload.label_name    = label_name    || null;
@@ -222,5 +243,5 @@ export async function PATCH(
     // Non-fatal — requirement is already updated
   }
 
-  return NextResponse.json({ data: { id: requirementId, status: "OPEN" } });
+  return NextResponse.json({ data: { id: requirementId, status: "OPEN", corrected_type: correctedType } });
 }

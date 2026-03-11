@@ -7,7 +7,9 @@
       "mcp__supabase__list_tables",
       "mcp__supabase__apply_migration",
       "Bash(git add app/requirements/[id]/page.tsx app/api/brand-product/fuzzy-search/route.ts app/api/requirements/[id]/route.ts app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js)",
-      "Bash(git add 'app/requirements/[id]/page.tsx' 'app/api/brand-product/fuzzy-search/route.ts' 'app/api/requirements/[id]/route.ts' app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js .claude/)"
+      "Bash(git add 'app/requirements/[id]/page.tsx' 'app/api/brand-product/fuzzy-search/route.ts' 'app/api/requirements/[id]/route.ts' app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js .claude/)",
+      "Bash(git add CLAUDE.md app/api/requirements/route.ts \"app/api/requirements/[id]/route.ts\" app/components/ExtractionReview.tsx app/components/RequirementForm.tsx supabase/schema.sql)",
+      "Bash(git add app/page.tsx \"app/requirements/[id]/page.tsx\")"
     ]
   }
 }

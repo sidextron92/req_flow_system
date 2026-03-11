@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { getSystemPrompt } from "@/lib/ai.config";
 import { validateExtraction, type ValidationResult } from "@/lib/extraction-validation";
 
@@ -61,6 +61,13 @@ export default function ExtractionReview({
   // ── Done / save state ──────────────────────────────────────
   const [isSaving, setIsSaving]             = useState(false);
   const [saveError, setSaveError]           = useState<string | null>(null);
+  const [typeCorrectionMsg, setTypeCorrectionMsg] = useState<string | null>(null);
+  const dismissTypeCorrection = useCallback(() => setTypeCorrectionMsg(null), []);
+  useEffect(() => {
+    if (!typeCorrectionMsg) return;
+    const t = setTimeout(dismissTypeCorrection, 4000);
+    return () => clearTimeout(t);
+  }, [typeCorrectionMsg, dismissTypeCorrection]);
 
   // ── Chat state ─────────────────────────────────────────────
   const [view, setView]                     = useState<ViewState>("extraction");
@@ -160,6 +167,14 @@ export default function ExtractionReview({
       if (!res.ok) {
         setSaveError(json.error ?? "Save failed");
         return false;
+      }
+
+      const correctedType: string | undefined = json.data?.corrected_type;
+      if (correctedType && correctedType !== requirementType) {
+        const labels: Record<string, string> = { RESTOCK: "Restock", NEW_VARIETY: "New Variety", NEW_LABEL: "New Label" };
+        setTypeCorrectionMsg(
+          `Requirement type changed from ${labels[requirementType] ?? requirementType} to ${labels[correctedType] ?? correctedType}`
+        );
       }
 
       return true;
@@ -528,6 +543,14 @@ export default function ExtractionReview({
             <p className="text-sm text-gray-500 text-center">
               Your requirement has been saved and is now open for processing.
             </p>
+            {typeCorrectionMsg && (
+              <div className="w-full flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z" />
+                </svg>
+                <span>{typeCorrectionMsg}</span>
+              </div>
+            )}
             <button
               onClick={onClose}
               className="mt-2 w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors"

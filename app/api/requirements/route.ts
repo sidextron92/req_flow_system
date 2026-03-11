@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     .select(`
       id, type, status, label_name, label_id,
       category_id, category_name, expiry_date,
-      remarks, attachments, created_at, updated_at,
+      remarks, attachments, comment_log, created_at, updated_at,
       assigned_to_user_id, assigned_date,
       requirement_products ( id, product_id, product_name, notes )
     `)
