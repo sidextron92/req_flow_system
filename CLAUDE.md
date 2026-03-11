@@ -49,7 +49,6 @@ npm run lint   # ESLint
 | `/api/requirements/[id]/status` | PATCH | Role-gated status transition; validates role + transition, writes audit log |
 | `/api/requirements/[id]/assign` | PATCH | Reassign to a different bijnisBuyer; only current assignee (role=bijnisBuyer) can call; status must be OPEN or IN_PROCESS; ASSIGNMENT_CHANGE written via DB trigger; assigned_date unchanged |
 | `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array |
-| `/api/categories` | GET | All categories |
 | `/api/user` | GET | User info from users table |
 | `/api/users/bijnisBuyers` | GET | All users with role='bijnisBuyer' (id, name, phone); used by reassign bottom sheet |
 | `/api/transcribe` | POST | Deepgram: audio → Hindi transcript |
