@@ -32,6 +32,7 @@ const REQUIRED_BY_TYPE: Record<
     { key: "qty_required",  label: "Quantity required (e.g. 50 pairs)", check: nonEmpty },
   ],
   NEW_VARIETY: [
+    { key: "label_name",    label: "Brand / label name",              check: nonEmpty },
     { key: "expiry_date",   label: "Delivery deadline",               check: nonEmpty },
     { key: "qty_required",  label: "Quantity required (e.g. 30 units)", check: nonEmpty },
   ],

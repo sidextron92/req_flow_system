@@ -32,9 +32,15 @@ export const AI_CONFIG = {
 const CATEGORY_LIST = `"Accessories","Bellies","Blouse & Petticoat","Boots","Crocks","Dress & Gowns","Dupattas","Formals","Full Moulded Shoes","Innerwear","Jackets","Jeans","Juttis","Kurtas & Kurta Set","Kurti & Kurti Set","Leggings, Plazzo & Salwars","Loafers","Nightsuits & Night Gowns","Sandals","Sarees","School Shoes","Shirts","Shorts","Slippers","Sneakers","Sports","Sweaters","Sweatshirts/Hoodies","T-Shirts","Thermals","Top Bottom Set","Tops & Shrugs","Track Pants","TrackSuits","Trousers"`;
 
 // Common rules appended to every prompt — update here once to affect all types
-const COMMON_RULES = `- Match category_name exactly to one of the categories listed above if possible.
+function buildCommonRules(currentDate: string): string {
+  return `- Only output valid JSON. No markdown, no explanation outside the JSON.
+- If a field cannot be determined, set it to null.
+- Do not guess — only extract what is clearly visible or stated.
+- Match category_name exactly to one of the categories listed above if possible.
 - Do NOT output label_id or product_id fields. These are system-assigned IDs that will be looked up separately — never infer or generate them.
+- For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish including examples like "kal tak" (tomorrow), "parso tak" (day after tomorrow)) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
 - IMPORTANT — size range rule: all categories in this system are apparel or footwear. When the manager's notes contain a number range (e.g. "6 se 9", "7 to 10", "size 6-9", "no. 6 se 9 tak") ALWAYS interpret it as a shoe/garment SIZE RANGE, never as a time of day or delivery window. Capture the size range in the product notes (e.g. "sizes 6–9"). Only interpret a number range as a time if it is explicitly marked with "AM", "PM", "baje", or a similar time indicator.`;
+}
 
 /** Returns today's date as YYYY-MM-DD in local time. */
 function today(): string {
@@ -77,13 +83,9 @@ Your task is to extract as much information as possible and return it as a JSON 
 }
 
 Rules:
-- Only output valid JSON. No markdown, no explanation outside the JSON.
-- If a field cannot be determined, set it to null.
-- Do not guess — only extract what is clearly visible or stated.
 - If multiple products are visible, list them all in the products array.
 - For product_name: the value MUST follow the format "BrandName NumericCode" (e.g. "ASIAN 010", "Campus 2345", "Bata 1234"). Both parts — a recognisable brand name AND a numeric code — must be clearly visible or stated. If either part is missing or ambiguous, set product_name to null.
-- For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-${COMMON_RULES}`;
+${buildCommonRules(currentDate)}`;
 }
 
 // ── NEW LABEL ─────────────────────────────────────────────────
@@ -123,13 +125,9 @@ Your task is to extract as much information as possible and return it as a JSON 
 }
 
 Rules:
-- Only output valid JSON. No markdown, no explanation outside the JSON.
-- If a field cannot be determined, set it to null.
-- Do not guess — only extract what is clearly visible or stated.
 - For NEW_LABEL, the products array should contain at most one representative product.
 - For qty_required: extract any quantity mentioned (e.g. "50 pieces", "2 dozen", "ek sau jodi") and normalise to a short string like "50 pairs". Include the unit if stated. If no quantity is mentioned, set to null.
-- For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-${COMMON_RULES}`;
+${buildCommonRules(currentDate)}`;
 }
 
 // ── NEW VARIETY ───────────────────────────────────────────────
@@ -169,13 +167,9 @@ Your task is to extract as much information as possible and return it as a JSON 
 }
 
 Rules:
-- Only output valid JSON. No markdown, no explanation outside the JSON.
-- If a field cannot be determined, set it to null.
-- Do not guess — only extract what is clearly visible or stated.
 - In product_name, always include the variant differentiator (colour, size, style) so it is unambiguous.
 - For qty_required: extract any quantity mentioned (e.g. "50 pieces", "2 dozen", "ek sau jodi") and normalise to a short string like "50 pairs". Include the unit if stated. If no quantity is mentioned, set to null.
-- For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-${COMMON_RULES}`;
+${buildCommonRules(currentDate)}`;
 }
 
 // ── Builder map — keyed by DB enum value ─────────────────────
