@@ -6,7 +6,7 @@ Darkstore requirement management app. Darkstore managers capture three types of 
 - **NEW_LABEL** — introduce a new brand/label
 - **NEW_VARIETY** — add new variants of an existing brand
 
-Core workflow: Manager fills a form (images + voice note + category) → AI extracts structured data → chat loop fills any gaps → fuzzy match against brand/product catalog → saved to DB as OPEN.
+Core workflow: Manager fills a form (images + voice note + category) → AI extracts structured data → **category confidence check** (if < 70%, chat prompts user to confirm/correct category with AI-suggested pills) → chat loop fills any remaining gaps → fuzzy match against brand/product catalog → saved to DB as OPEN.
 
 ## Stack
 - **Next.js 16** App Router, TypeScript, Tailwind CSS v4
@@ -30,8 +30,8 @@ npm run lint   # ESLint
 | `app/page.tsx` | Home: requirement list + "New Requirement" CTA |
 | `app/requirements/[id]/page.tsx` | Detail: view/edit fields, comments, attachments |
 | `app/components/RequirementForm.tsx` | Modal: type select, image upload, voice record |
-| `app/components/ExtractionReview.tsx` | AI review: edit JSON, chat to fill gaps, fuzzy match |
-| `lib/ai.config.ts` | Model choice + system prompts per requirement type |
+| `app/components/ExtractionReview.tsx` | AI review: edit JSON, category confidence check (pills), chat to fill gaps, fuzzy match |
+| `lib/ai.config.ts` | Model choice + system prompts per requirement type; exports `CATEGORY_LIST` and `CATEGORY_NAMES` |
 | `lib/ai.service.ts` | Extraction logic (Anthropic + Gemini) |
 | `lib/supabase.ts` | `supabase` (browser/anon) + `supabaseAdmin` (service role) |
 | `lib/extraction-validation.ts` | Required fields per type; drives chat prompts |
@@ -56,7 +56,7 @@ npm run lint   # ESLint
 | `/api/user` | GET | User info from users table |
 | `/api/users/bijnisBuyers` | GET | All users with role='bijnisBuyer' (id, name, phone); used by reassign bottom sheet |
 | `/api/transcribe` | POST | Deepgram: audio → Hindi transcript |
-| `/api/ai/fill-missing` | POST | AI fills missing fields from chat input |
+| `/api/ai/fill-missing` | POST | AI fills missing fields from chat input; also supports `requestType: "category_suggestions"` to return top-5 ranked categories from `CATEGORY_LIST` |
 | `/api/ai/re-extract` | POST | Re-run extraction with edited system prompt |
 | `/api/brand-product/fuzzy-search` | POST | Trigram fuzzy search for brands/products |
 | `/api/push/subscribe` | GET | Returns `{ subscribed, device_info, created_at }` for a userId |
@@ -132,7 +132,7 @@ All notifications are fire-and-forget (IIFE async) — failures never affect the
 - Pill buttons for fuzzy match selection (blue = catalog suggestion, gray = as-typed)
 
 ## Architecture notes
-- AI extraction returns a JSON blob; `ExtractionReview` drives a 4-step state machine: `extraction → chat → fuzzy-match → success`
+- AI extraction returns a JSON blob; `ExtractionReview` drives a state machine: `extraction → [category-correction chat] → [missing-fields chat] → fuzzy-match → success`. The category step is skipped if `confidence.category_name ≥ 0.9` and `category_name` is non-null.
 - If extraction is valid and has exact brand/product matches, the fuzzy-match view is skipped entirely
 - `buildMergedExtraction()` in ExtractionReview merges selected fuzzy picks back into the extraction before saving
 - Supabase anon key is used in the browser; `SUPABASE_SERVICE_KEY` is server-only (in API routes via `supabaseAdmin`)
@@ -172,9 +172,22 @@ This section documents every step end-to-end. Reference a step number when descr
 
 ---
 
-### Step 3 — Validation & Chat loop (`lib/extraction-validation.ts` + `/api/ai/fill-missing`)
+### Step 3 — Category confidence check + Validation & Chat loop (`lib/extraction-validation.ts` + `/api/ai/fill-missing`)
 
-3.1 When the user clicks **Done**, `validateExtraction()` checks required fields by type:
+#### 3.0 Category confidence check (runs first, before validation)
+When the user clicks **Done**, `ExtractionReview` first checks `confidence.category_name`:
+- If `confidence.category_name < 0.7` **or** `category_name` is null → open chat view in "Confirm Category" mode:
+  1. POSTs to `/api/ai/fill-missing` with `requestType: "category_suggestions"` — AI returns top-5 ranked categories from `CATEGORY_LIST` ordered by likelihood.
+  2. Chat shows the AI's opening message (with current category + confidence %, or "couldn't determine") and renders the suggestions as blue pill buttons.
+  3. User taps a pill (auto-accepted) or types freely.
+  4. Free-text is first matched case-insensitively against `CATEGORY_NAMES` (client-side). If matched → accepted. If not → sent to `/api/ai/fill-missing` (normal `fill` mode) to resolve. If AI resolves to a valid category → accepted. If still unresolved → new suggestions are fetched and shown again.
+  5. Once a valid category is confirmed, `categoryCheckDone = true` and flow continues to 3.1.
+- If `confidence.category_name ≥ 0.9` and `category_name` is non-null → skip category check, proceed to 3.1.
+
+The `categoryCheckDone` flag resets when **Re-run** is used, so a new extraction always re-evaluates category confidence.
+
+#### 3.1 Field validation
+`validateExtraction()` checks required fields by type:
 
 | Type | Required fields |
 |------|----------------|
@@ -183,8 +196,14 @@ This section documents every step end-to-end. Reference a step number when descr
 | NEW_VARIETY | `expiry_date`, `qty_required` |
 
 3.2 If **valid** → skip to Step 4 (fuzzy match check).
-3.3 If **invalid** → open chat view. AI is given `currentExtraction` + `missingKeys` + the user's natural language reply → returns `updated_extraction` JSON.
+3.3 If **invalid** → chat view switches to "Missing Details" mode. AI is given `currentExtraction` + `missingKeys` + the user's natural language reply → returns `updated_extraction` JSON.
 3.4 After each chat turn the extraction is re-validated. If now valid → proceed to Step 4. If still missing → continue chat.
+
+#### `/api/ai/fill-missing` — request modes
+| `requestType` | Behaviour |
+|---------------|-----------|
+| `"fill"` (default) | Fills `missingKeys` from `userMessage`. Returns `{ updated_extraction, filled_fields }`. |
+| `"category_suggestions"` | Ignores `userMessage`/`missingKeys`. Uses extraction context + `CATEGORY_LIST` to return `{ category_suggestions: string[] }` (top 5, ordered by confidence). |
 
 ---
 

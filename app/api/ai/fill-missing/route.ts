@@ -5,13 +5,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
-import { AI_CONFIG } from "@/lib/ai.config";
+import { AI_CONFIG, CATEGORY_LIST } from "@/lib/ai.config";
 
 interface FillMissingBody {
   requirementType: string;        // DB enum e.g. "RESTOCK"
   currentExtraction: Record<string, unknown>;
   missingKeys: string[];          // e.g. ["label_name", "expiry_date"]
   userMessage: string;            // free-text reply from the manager
+  requestType?: "fill" | "category_suggestions"; // default: "fill"
 }
 
 function today(): string {
@@ -56,6 +57,33 @@ Example output shape (only include keys that were missing):
 }`;
 }
 
+function buildCategorySuggestionsPrompt(extraction: Record<string, unknown>): string {
+  const labelName    = extraction.label_name    ? String(extraction.label_name)    : "";
+  const currentCat  = extraction.category_name  ? String(extraction.category_name)  : "";
+  const remarks     = extraction.remarks         ? String(extraction.remarks)         : "";
+  const productNames = Array.isArray(extraction.products)
+    ? (extraction.products as Record<string, unknown>[])
+        .map((p) => String(p.product_name ?? "")).filter(Boolean).join(", ")
+    : "";
+
+  return `You are helping classify a product requirement for a darkstore into the correct apparel/footwear category.
+
+Available categories (pick ONLY from this list):
+${CATEGORY_LIST}
+
+Context clues from the requirement:
+- Brand / label name: ${labelName || "(not extracted)"}
+- Current extracted category (may be wrong or missing): ${currentCat || "(none)"}
+- Product names: ${productNames || "(none)"}
+- Remarks / notes: ${remarks || "(none)"}
+
+Return the top 5 most likely categories from the list above, ordered by confidence (most likely first).
+Output ONLY valid JSON in this exact shape — no markdown, no explanation:
+{ "category_suggestions": ["Category1", "Category2", "Category3", "Category4", "Category5"] }
+
+Each value MUST exactly match one of the categories in the list above.`;
+}
+
 export async function POST(req: NextRequest) {
   let body: FillMissingBody;
   try {
@@ -64,8 +92,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { requirementType, currentExtraction, missingKeys, userMessage } = body;
+  const { requirementType, currentExtraction, missingKeys, userMessage, requestType = "fill" } = body;
 
+  // ── Category suggestions mode ─────────────────────────────────
+  if (requestType === "category_suggestions") {
+    const prompt = buildCategorySuggestionsPrompt(currentExtraction);
+    try {
+      let raw = "";
+      if (AI_CONFIG.provider === "anthropic") {
+        const apiKey = process.env[AI_CONFIG.apiKeyEnvVar];
+        if (!apiKey) throw new Error(`Missing env var: ${AI_CONFIG.apiKeyEnvVar}`);
+        const client = new Anthropic({ apiKey });
+        const msg = await client.messages.create({
+          model: AI_CONFIG.model,
+          max_tokens: 256,
+          messages: [{ role: "user", content: prompt }],
+        });
+        raw = msg.content.filter((b) => b.type === "text").map((b) => (b as Anthropic.TextBlock).text).join("");
+      } else if (AI_CONFIG.provider === "gemini") {
+        const apiKey = process.env[AI_CONFIG.apiKeyEnvVar];
+        if (!apiKey) throw new Error(`Missing env var: ${AI_CONFIG.apiKeyEnvVar}`);
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+          model: AI_CONFIG.model,
+          config: { responseMimeType: "application/json", maxOutputTokens: 256 },
+          contents: [{ text: prompt }],
+        });
+        raw = response.text ?? "";
+      } else {
+        throw new Error(`Unsupported AI provider: ${AI_CONFIG.provider}`);
+      }
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+      const parsed = JSON.parse(cleaned) as { category_suggestions: string[] };
+      return NextResponse.json({ data: { category_suggestions: parsed.category_suggestions ?? [] } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown AI error";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+  }
+
+  // ── Normal fill-missing mode ──────────────────────────────────
   if (!requirementType || !userMessage || !missingKeys?.length) {
     return NextResponse.json({ error: "requirementType, missingKeys, and userMessage are required" }, { status: 400 });
   }

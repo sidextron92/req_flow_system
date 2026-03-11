@@ -29,7 +29,10 @@ export const AI_CONFIG = {
 // before re-running. Add new types here as needed.
 // ============================================================
 
-const CATEGORY_LIST = `"Accessories","Bellies","Blouse & Petticoat","Boots","Crocks","Dress & Gowns","Dupattas","Formals","Full Moulded Shoes","Innerwear","Jackets","Jeans","Juttis","Kurtas & Kurta Set","Kurti & Kurti Set","Leggings, Plazzo & Salwars","Loafers","Nightsuits & Night Gowns","Sandals","Sarees","School Shoes","Shirts","Shorts","Slippers","Sneakers","Sports","Sweaters","Sweatshirts/Hoodies","T-Shirts","Thermals","Top Bottom Set","Tops & Shrugs","Track Pants","TrackSuits","Trousers"`;
+export const CATEGORY_LIST = `"Accessories","Bellies","Blouse & Petticoat","Boots","Crocks","Dress & Gowns","Dupattas","Formals","Full Moulded Shoes","Innerwear","Jackets","Jeans","Juttis","Kurtas & Kurta Set","Kurti & Kurti Set","Leggings, Plazzo & Salwars","Loafers","Nightsuits & Night Gowns","Sandals","Sarees","School Shoes","Shirts","Shorts","Slippers","Sneakers","Sports","Sweaters","Sweatshirts/Hoodies","T-Shirts","Thermals","Top Bottom Set","Tops & Shrugs","Track Pants","TrackSuits","Trousers"`;
+
+/** Parsed array of all valid category names. */
+export const CATEGORY_NAMES: string[] = CATEGORY_LIST.replace(/"/g, "").split(",");
 
 // Common rules appended to every prompt — update here once to affect all types
 function buildCommonRules(currentDate: string): string {

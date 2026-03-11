@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getSystemPrompt } from "@/lib/ai.config";
+import { getSystemPrompt, CATEGORY_NAMES } from "@/lib/ai.config";
 import { validateExtraction, type ValidationResult } from "@/lib/extraction-validation";
 
 interface ExtractionReviewProps {
@@ -77,6 +77,11 @@ export default function ExtractionReview({
   const [fillError, setFillError]           = useState<string | null>(null);
   const [pendingValidation, setPendingValidation] = useState<ValidationResult | null>(null);
 
+  // ── Category correction state ──────────────────────────────
+  const [categoryCheckDone, setCategoryCheckDone]           = useState(false);
+  const [categorySuggestions, setCategorySuggestions]       = useState<string[]>([]);
+  const [isFetchingCategorySuggestions, setIsFetchingCategorySuggestions] = useState(false);
+
   // ── Fuzzy match state ──────────────────────────────────────
   const [fuzzyState, setFuzzyState]           = useState<FuzzyMatchState | null>(null);
   const [selectedLabel, setSelectedLabel]     = useState<{ name: string; id: string; supply_tl_id: string | null } | null>(null);
@@ -118,6 +123,8 @@ export default function ExtractionReview({
 
       setExtraction(json.data.extracted_data);
       setCurrentModel(json.data.model_used);
+      setCategoryCheckDone(false);
+      setCategorySuggestions([]);
     } catch {
       setRerunError("Network error — please try again");
     } finally {
@@ -351,6 +358,51 @@ export default function ExtractionReview({
   async function handleDone() {
     if (!extraction) return;
 
+    // ── Category confidence check ────────────────────────────
+    // Trigger if category_name is null OR confidence < 0.7, and not yet confirmed.
+    if (!categoryCheckDone) {
+      const conf = extraction.confidence as Record<string, number> | null | undefined;
+      const categoryConfidence = conf?.category_name ?? (extraction.category_name ? 1 : 0);
+      const needsCategoryCheck = categoryConfidence < 0.9 || !extraction.category_name;
+
+      if (needsCategoryCheck) {
+        setIsFetchingCategorySuggestions(true);
+        setCategorySuggestions([]);
+        let suggestions: string[] = [];
+        try {
+          const res = await fetch("/api/ai/fill-missing", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              requirementType,
+              currentExtraction: extraction,
+              missingKeys: ["category_name"],
+              userMessage: "",
+              requestType: "category_suggestions",
+            }),
+          });
+          const json = await res.json();
+          if (res.ok && Array.isArray(json.data?.category_suggestions)) {
+            suggestions = json.data.category_suggestions;
+          }
+        } catch {
+          // ignore — show empty suggestions, user can still type
+        } finally {
+          setIsFetchingCategorySuggestions(false);
+        }
+
+        setCategorySuggestions(suggestions);
+        const currentCat = extraction.category_name ? String(extraction.category_name) : null;
+        const openingMsg = currentCat
+          ? `I'm not confident about the category I detected: **${currentCat}** (${Math.round(categoryConfidence * 100)}% confidence).\n\nPlease confirm or select the correct one:`
+          : `I couldn't determine the category from the images/notes.\n\nPlease select the correct category:`;
+        setChatMessages([{ role: "assistant", text: openingMsg }]);
+        setView("chat");
+        return;
+      }
+    }
+
+    // ── Normal validation ────────────────────────────────────
     const validation = validateExtraction(extraction, requirementType);
 
     if (validation.valid) {
@@ -367,12 +419,147 @@ export default function ExtractionReview({
   // ── Chat: user sends a message ─────────────────────────────
   async function handleChatSend() {
     const userText = chatInput.trim();
-    if (!userText || isFilling || !pendingValidation || !extraction) return;
+    if (!userText || isFilling || !extraction) return;
 
     setChatInput("");
     setFillError(null);
     setChatMessages((prev) => [...prev, { role: "user", text: userText }]);
     setIsFilling(true);
+
+    // ── Category correction phase ────────────────────────────
+    if (!categoryCheckDone) {
+      // Try exact match against CATEGORY_NAMES first (case-insensitive)
+      const matched = CATEGORY_NAMES.find(
+        (c) => c.toLowerCase() === userText.toLowerCase()
+      );
+
+      if (matched) {
+        // Exact match — accept and continue
+        const updated = { ...extraction, category_name: matched };
+        setExtraction(updated);
+        setCategoryCheckDone(true);
+        setCategorySuggestions([]);
+
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: `Got it! Category set to **${matched}**.` },
+        ]);
+        setIsFilling(false);
+
+        // Now run normal validation for remaining missing fields
+        const validation = validateExtraction(updated, requirementType);
+        if (validation.valid) {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", text: "All details look good. Checking against catalog..." },
+          ]);
+          await runFuzzyMatchCheck(updated);
+        } else {
+          setPendingValidation(validation);
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", text: buildAskMessage(validation.missingFields) },
+          ]);
+        }
+        return;
+      }
+
+      // No exact match — ask AI to resolve against the list
+      try {
+        const res = await fetch("/api/ai/fill-missing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requirementType,
+            currentExtraction: extraction,
+            missingKeys: ["category_name"],
+            userMessage: userText,
+            requestType: "fill",
+          }),
+        });
+
+        const json = await res.json();
+
+        if (!res.ok) {
+          setFillError(json.error ?? "AI could not process your reply");
+          setIsFilling(false);
+          return;
+        }
+
+        const updated: Record<string, unknown> = json.data.updated_extraction;
+        const resolvedCategory = updated.category_name ? String(updated.category_name) : null;
+
+        // Verify AI resolved to a valid category
+        const validResolved = resolvedCategory
+          ? CATEGORY_NAMES.find((c) => c.toLowerCase() === resolvedCategory.toLowerCase())
+          : null;
+
+        if (validResolved) {
+          const finalUpdated = { ...updated, category_name: validResolved };
+          setExtraction(finalUpdated);
+          setCategoryCheckDone(true);
+          setCategorySuggestions([]);
+
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", text: `Got it! Category set to **${validResolved}**.` },
+          ]);
+          setIsFilling(false);
+
+          const validation = validateExtraction(finalUpdated, requirementType);
+          if (validation.valid) {
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant", text: "All details look good. Checking against catalog..." },
+            ]);
+            await runFuzzyMatchCheck(finalUpdated);
+          } else {
+            setPendingValidation(validation);
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant", text: buildAskMessage(validation.missingFields) },
+            ]);
+          }
+        } else {
+          // Still couldn't resolve — fetch new suggestions and ask again
+          let newSuggestions: string[] = [];
+          try {
+            const sugRes = await fetch("/api/ai/fill-missing", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                requirementType,
+                currentExtraction: updated,
+                missingKeys: ["category_name"],
+                userMessage: "",
+                requestType: "category_suggestions",
+              }),
+            });
+            const sugJson = await sugRes.json();
+            if (sugRes.ok && Array.isArray(sugJson.data?.category_suggestions)) {
+              newSuggestions = sugJson.data.category_suggestions;
+            }
+          } catch { /* ignore */ }
+
+          setCategorySuggestions(newSuggestions);
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", text: `I couldn't match that to a known category. Please select from the options below:` },
+          ]);
+          setIsFilling(false);
+        }
+      } catch {
+        setFillError("Network error — please try again");
+        setIsFilling(false);
+      }
+      return;
+    }
+
+    // ── Normal fill-missing phase ────────────────────────────
+    if (!pendingValidation) {
+      setIsFilling(false);
+      return;
+    }
 
     try {
       const res = await fetch("/api/ai/fill-missing", {
@@ -417,6 +604,40 @@ export default function ExtractionReview({
       }
     } catch {
       setFillError("Network error — please try again");
+      setIsFilling(false);
+    }
+  }
+
+  // ── Category pill selected ─────────────────────────────────
+  async function handleCategoryPillSelect(cat: string) {
+    if (isFilling || !extraction) return;
+    setChatMessages((prev) => [...prev, { role: "user", text: cat }]);
+    setIsFilling(true);
+
+    const updated = { ...extraction, category_name: cat };
+    setExtraction(updated);
+    setCategoryCheckDone(true);
+    setCategorySuggestions([]);
+
+    setChatMessages((prev) => [
+      ...prev,
+      { role: "assistant", text: `Got it! Category set to **${cat}**.` },
+    ]);
+
+    const validation = validateExtraction(updated, requirementType);
+    if (validation.valid) {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: "All details look good. Checking against catalog..." },
+      ]);
+      setIsFilling(false);
+      await runFuzzyMatchCheck(updated);
+    } else {
+      setPendingValidation(validation);
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: buildAskMessage(validation.missingFields) },
+      ]);
       setIsFilling(false);
     }
   }
@@ -849,7 +1070,9 @@ export default function ExtractionReview({
           <>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
               <div>
-                <h2 className="text-base font-semibold text-gray-900">Missing Details</h2>
+                <h2 className="text-base font-semibold text-gray-900">
+                  {!categoryCheckDone ? "Confirm Category" : "Missing Details"}
+                </h2>
                 <p className="text-xs text-gray-400 mt-0.5">Reply in any language</p>
               </div>
               <button
@@ -874,6 +1097,34 @@ export default function ExtractionReview({
                   </div>
                 </div>
               ))}
+
+              {/* Category suggestion pills — shown during category correction phase */}
+              {!categoryCheckDone && !isFilling && (
+                isFetchingCategorySuggestions ? (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3">
+                      <div className="flex gap-1 items-center">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:0ms]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:150ms]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:300ms]" />
+                      </div>
+                    </div>
+                  </div>
+                ) : categorySuggestions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {categorySuggestions.map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => handleCategoryPillSelect(cat)}
+                        disabled={isFilling}
+                        className="text-sm px-3 py-1.5 rounded-full border font-medium transition-colors bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100 active:bg-blue-200 disabled:opacity-50"
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                ) : null
+              )}
 
               {isFilling && (
                 <div className="flex justify-start">
@@ -902,7 +1153,7 @@ export default function ExtractionReview({
                   const isMobile = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
                   if (e.key === "Enter" && !e.shiftKey && !isMobile) { e.preventDefault(); handleChatSend(); }
                 }}
-                placeholder="Type your reply..."
+                placeholder={!categoryCheckDone ? "Or type a category name..." : "Type your reply..."}
                 disabled={isFilling}
                 rows={1}
                 className="flex-1 bg-gray-100 rounded-2xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
