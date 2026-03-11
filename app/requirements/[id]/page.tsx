@@ -69,7 +69,7 @@ interface BijnisBuyer {
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT:                 "bg-gray-100 text-gray-600",
-  OPEN:                  "bg-blue-100 text-blue-700",
+  OPEN:                  "bg-green-100 text-green-700",
   IN_PROCESS:            "bg-yellow-100 text-yellow-700",
   REVIEW_FOR_COMPLETION: "bg-purple-100 text-purple-700",
   COMPLETED:             "bg-green-100 text-green-700",
@@ -262,7 +262,7 @@ function StatusUpdateDialog({
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium transition-colors"
+            className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm font-medium transition-colors"
           >
             {loading ? "Updating…" : "Confirm"}
           </button>
@@ -321,7 +321,7 @@ function StatusUpdater({
     if (status === "CANNOT_BE_DONE") {
       return "px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-300 text-gray-500 hover:bg-gray-100 active:bg-gray-200 transition-colors";
     }
-    return "px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white active:bg-blue-800 transition-colors";
+    return "px-3 py-1.5 rounded-xl text-xs font-semibold bg-green-600 hover:bg-green-700 text-white active:bg-green-800 transition-colors";
   }
 
   return (
@@ -445,7 +445,7 @@ function ReassignSheet({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by name…"
-              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
               autoFocus
             />
           </div>
@@ -475,7 +475,7 @@ function ReassignSheet({
                   <button
                     onClick={() => setPendingBuyer(buyer)}
                     disabled={submitting}
-                    className="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-blue-50 active:bg-blue-100 transition-colors disabled:opacity-50 text-left"
+                    className="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-green-50 active:bg-green-100 transition-colors disabled:opacity-50 text-left"
                   >
                     <div className="flex flex-col gap-0.5">
                       <span className="text-sm font-semibold text-gray-900">{buyer.name}</span>
@@ -514,7 +514,7 @@ function ReassignSheet({
               <button
                 onClick={confirmReassign}
                 disabled={submitting}
-                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium transition-colors"
+                className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm font-medium transition-colors"
               >
                 {submitting ? "Reassigning…" : "Confirm"}
               </button>
@@ -627,7 +627,7 @@ function CollapsibleOverview({
               {canReassign && (
                 <button
                   onClick={onReassign}
-                  className="self-start flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                  className="self-start flex items-center gap-1.5 text-xs font-medium text-green-600 hover:text-green-700 transition-colors"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16 17l5-5-5-5M2 12h19" />
@@ -740,7 +740,7 @@ function AttachmentCarousel({ attachments, startIndex, onClose }: {
               href={att.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-400 text-sm underline"
+              className="text-green-400 text-sm underline"
             >
               Open file
             </a>
@@ -851,7 +851,7 @@ function ChatBubble({ entry, isMine }: { entry: CommentEntry; isMine: boolean })
       <div
         className={`px-3.5 py-2.5 rounded-2xl text-sm leading-snug ${
           isMine
-            ? "bg-blue-600 text-white rounded-br-sm"
+            ? "bg-green-600 text-white rounded-br-sm"
             : "bg-gray-100 text-gray-900 rounded-bl-sm"
         }`}
       >
@@ -929,13 +929,13 @@ function ChatBox({
           }}
           placeholder="Type a comment…"
           rows={1}
-          className="flex-1 resize-none text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 max-h-28 overflow-y-auto"
+          className="flex-1 resize-none text-sm bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 max-h-28 overflow-y-auto"
           style={{ fieldSizing: "content" } as React.CSSProperties}
         />
         <button
           type="submit"
           disabled={!text.trim() || sending}
-          className="shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-xl px-3.5 py-2 transition-colors"
+          className="shrink-0 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded-xl px-3.5 py-2 transition-colors"
           aria-label="Send"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1112,7 +1112,7 @@ function DetailContent() {
     return (
       <div className="min-h-screen bg-gray-50 max-w-md mx-auto flex flex-col items-center justify-center gap-3 px-4">
         <p className="text-gray-500 text-sm">{error ?? "Something went wrong."}</p>
-        <button onClick={() => router.back()} className="text-blue-600 text-sm font-medium">← Go back</button>
+        <button onClick={() => router.back()} className="text-green-600 text-sm font-medium">← Go back</button>
       </div>
     );
   }

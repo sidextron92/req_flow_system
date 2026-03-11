@@ -44,7 +44,7 @@ type TabId = "byMe" | "forMe";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT:                 "bg-gray-100 text-gray-600",
-  OPEN:                  "bg-blue-100 text-blue-700",
+  OPEN:                  "bg-green-100 text-green-700",
   IN_PROCESS:            "bg-yellow-100 text-yellow-700",
   REVIEW_FOR_COMPLETION: "bg-purple-100 text-purple-700",
   COMPLETED:             "bg-green-100 text-green-700",
@@ -194,7 +194,7 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
       className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col gap-2.5 cursor-pointer active:scale-[0.98] transition-transform"
     >
       <div className="flex items-center justify-between">
-        <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-blue-500"}`}>
+        <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-green-500"}`}>
           {TYPE_LABELS[req.type] ?? req.type}
         </span>
         <span className="text-xs text-gray-400">{formatDate(req.created_at)}</span>
@@ -260,7 +260,7 @@ function AssignedRequirementCard({
       className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col gap-2.5 cursor-pointer active:scale-[0.98] transition-transform"
     >
       <div className="flex items-center justify-between">
-        <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-blue-500"}`}>
+        <span className={`text-xs font-semibold ${TYPE_COLORS[req.type] ?? "text-green-500"}`}>
           {TYPE_LABELS[req.type] ?? req.type}
         </span>
         <span className="text-xs text-gray-400">{formatDate(req.created_at)}</span>
@@ -338,7 +338,7 @@ function TabBar({
               <span
                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
                   isActive
-                    ? "bg-blue-600 text-white"
+                    ? "bg-green-600 text-white"
                     : "bg-gray-300 text-gray-600"
                 }`}
               >
@@ -400,7 +400,7 @@ function LabelFilterSheet({
           {activeLabel && (
             <button
               onClick={() => { onSelect(null); onClose(); }}
-              className="text-xs text-blue-600 font-medium"
+              className="text-xs text-green-600 font-medium"
             >
               Clear
             </button>
@@ -423,7 +423,7 @@ function LabelFilterSheet({
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
               placeholder="Search labels…"
-              className="w-full pl-9 pr-8 py-2 text-sm bg-gray-100 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-8 py-2 text-sm bg-gray-100 rounded-xl border-none outline-none focus:ring-2 focus:ring-green-500"
             />
             {localSearch && (
               <button
@@ -449,7 +449,7 @@ function LabelFilterSheet({
                   onClick={() => { onSelect(label === activeLabel ? null : label); onClose(); }}
                   className={`w-full text-left px-3 py-3 rounded-xl text-sm flex items-center justify-between transition-colors ${
                     activeLabel === label
-                      ? "bg-blue-50 text-blue-700 font-medium"
+                      ? "bg-green-50 text-green-700 font-medium"
                       : "text-gray-800 hover:bg-gray-50"
                   }`}
                 >
@@ -509,12 +509,12 @@ function SortSheet({
                 onClick={() => { onSelect(opt.value); onClose(); }}
                 className={`w-full text-left px-3 py-3.5 rounded-xl flex items-center justify-between transition-colors ${
                   sort === opt.value
-                    ? "bg-blue-50 text-blue-700"
+                    ? "bg-green-50 text-green-700"
                     : "text-gray-800 hover:bg-gray-50"
                 }`}
               >
                 <div>
-                  <p className={`text-sm font-medium ${sort === opt.value ? "text-blue-700" : "text-gray-900"}`}>
+                  <p className={`text-sm font-medium ${sort === opt.value ? "text-green-700" : "text-gray-900"}`}>
                     {opt.label}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
@@ -574,7 +574,7 @@ function SearchFilterBar({
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search requirements…"
-          className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
+          className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 placeholder:text-gray-400"
         />
         {searchQuery && (
           <button
@@ -593,7 +593,7 @@ function SearchFilterBar({
         onClick={onLabelClick}
         className={`shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl border text-xs font-medium transition-colors ${
           activeLabel
-            ? "bg-blue-600 text-white border-blue-600"
+            ? "bg-green-600 text-white border-green-600"
             : "bg-white text-gray-600 border-gray-200"
         }`}
       >
@@ -832,7 +832,7 @@ function HomeContent() {
             <button
               onClick={() => setFormOpen(true)}
               disabled={!userId}
-              className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-300 text-white font-semibold text-base py-4 rounded-2xl transition-colors shadow-sm"
+              className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-green-300 text-white font-semibold text-base py-4 rounded-2xl transition-colors shadow-sm"
             >
               + Create a New Requirement
             </button>
@@ -953,7 +953,7 @@ function HomeSkeleton() {
         <div className="h-7 w-28 bg-gray-200 rounded-lg animate-pulse" />
       </header>
       <div className="flex-1 px-4 py-6 flex flex-col gap-5">
-        <div className="h-14 w-full bg-blue-200 rounded-2xl animate-pulse" />
+        <div className="h-14 w-full bg-green-200 rounded-2xl animate-pulse" />
         <div className="flex flex-col gap-3">
           <div className="h-4 w-36 bg-gray-200 rounded animate-pulse" />
           {/* Tab bar skeleton */}

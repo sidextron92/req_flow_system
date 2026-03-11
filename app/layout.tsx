@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     title: "Req Flow",
   },
   icons: {
-    apple: "/icon-192.png",
+    apple: "/apple-touch-icon.png",
   },
 };
 
@@ -21,7 +21,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#2563eb",
+  themeColor: "#10B24B",
 };
 
 export default function RootLayout({

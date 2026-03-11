@@ -553,7 +553,7 @@ export default function ExtractionReview({
             )}
             <button
               onClick={onClose}
-              className="mt-2 w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors"
+              className="mt-2 w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors"
             >
               Close
             </button>
@@ -594,8 +594,8 @@ export default function ExtractionReview({
                           }
                           className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
                             isSelected
-                              ? "bg-blue-600 border-blue-600 text-white"
-                              : "bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100"
+                              ? "bg-green-600 border-green-600 text-white"
+                              : "bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
                           }`}
                         >
                           {s.brand_name}
@@ -710,8 +710,8 @@ export default function ExtractionReview({
                               }}
                               className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
                                 isSelected
-                                  ? "bg-blue-600 border-blue-600 text-white"
-                                  : "bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100"
+                                  ? "bg-green-600 border-green-600 text-white"
+                                  : "bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
                               }`}
                             >
                               {s.product_name}
@@ -836,7 +836,7 @@ export default function ExtractionReview({
                 type="button"
                 onClick={handleFuzzyConfirm}
                 disabled={isSaving}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
+                className="flex-1 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
               >
                 {isSaving ? "Saving..." : "Confirm & Save"}
               </button>
@@ -854,7 +854,7 @@ export default function ExtractionReview({
               </div>
               <button
                 onClick={() => setView("extraction")}
-                className="text-xs text-blue-600 font-semibold px-2 py-1"
+                className="text-xs text-green-600 font-semibold px-2 py-1"
               >
                 ← Back
               </button>
@@ -866,7 +866,7 @@ export default function ExtractionReview({
                   <div
                     className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
                       msg.role === "user"
-                        ? "bg-blue-600 text-white rounded-br-sm"
+                        ? "bg-green-600 text-white rounded-br-sm"
                         : "bg-gray-100 text-gray-800 rounded-bl-sm"
                     }`}
                   >
@@ -905,13 +905,13 @@ export default function ExtractionReview({
                 placeholder="Type your reply..."
                 disabled={isFilling}
                 rows={1}
-                className="flex-1 bg-gray-100 rounded-2xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
+                className="flex-1 bg-gray-100 rounded-2xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
                 style={{ fieldSizing: "content" } as React.CSSProperties}
               />
               <button
                 onClick={handleChatSend}
                 disabled={isFilling || !chatInput.trim()}
-                className="w-11 h-11 rounded-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-300 flex items-center justify-center flex-shrink-0 transition-colors self-end"
+                className="w-11 h-11 rounded-full bg-green-600 hover:bg-green-700 active:bg-green-800 disabled:bg-green-300 flex items-center justify-center flex-shrink-0 transition-colors self-end"
                 aria-label="Send"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
@@ -973,7 +973,7 @@ export default function ExtractionReview({
                 <button
                   type="button"
                   onClick={() => setShowPromptEditor((v) => !v)}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-blue-600"
+                  className="flex items-center gap-1.5 text-xs font-semibold text-green-600"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -991,7 +991,7 @@ export default function ExtractionReview({
                       value={systemPrompt}
                       onChange={(e) => setSystemPrompt(e.target.value)}
                       rows={10}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 font-mono focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
                     />
                     <button
                       type="button"
@@ -1018,7 +1018,7 @@ export default function ExtractionReview({
                 type="button"
                 onClick={handleDone}
                 disabled={!extraction || isSaving || isRerunning || isFuzzyChecking}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
+                className="flex-1 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
               >
                 {isFuzzyChecking ? "Checking..." : isSaving ? "Saving..." : "Done"}
               </button>

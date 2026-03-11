@@ -90,8 +90,8 @@ export default function PushPermissionPrompt({ userId }: { userId: number }) {
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-md z-50 animate-in slide-in-from-bottom-4 duration-300">
       <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-4 flex items-start gap-3">
-        <div className="shrink-0 w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center mt-0.5">
-          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <div className="shrink-0 w-9 h-9 bg-green-100 rounded-full flex items-center justify-center mt-0.5">
+          <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
         </div>
@@ -101,7 +101,7 @@ export default function PushPermissionPrompt({ userId }: { userId: number }) {
           <div className="flex gap-2 mt-3">
             <button
               onClick={handleAllow}
-              className="flex-1 bg-blue-600 text-white text-sm font-medium py-1.5 rounded-lg"
+              className="flex-1 bg-green-600 text-white text-sm font-medium py-1.5 rounded-lg"
             >
               Allow
             </button>

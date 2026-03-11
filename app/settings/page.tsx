@@ -177,7 +177,7 @@ function SettingsContent() {
               <button
                 onClick={subscribe}
                 disabled={working}
-                className="mt-1 text-sm text-blue-600 font-medium disabled:opacity-50"
+                className="mt-1 text-sm text-green-600 font-medium disabled:opacity-50"
               >
                 {working ? "Subscribing…" : "Resubscribe this device"}
               </button>
@@ -196,7 +196,7 @@ function SettingsContent() {
               <button
                 onClick={subscribe}
                 disabled={working}
-                className="w-full mt-1 bg-blue-600 text-white text-sm font-medium py-2.5 rounded-xl disabled:opacity-50"
+                className="w-full mt-1 bg-green-600 text-white text-sm font-medium py-2.5 rounded-xl disabled:opacity-50"
               >
                 {working ? "Enabling…" : "Enable for this device"}
               </button>
