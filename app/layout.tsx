@@ -35,7 +35,27 @@ export default function RootLayout({
         {/* Capture beforeinstallprompt before React mounts so the prompt isn't lost */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;});`,
+            __html: `
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;});
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.ready.then(function(reg){
+    reg.addEventListener('updatefound',function(){
+      var newWorker=reg.installing;
+      newWorker.addEventListener('statechange',function(){
+        if(newWorker.state==='installed'&&navigator.serviceWorker.controller){
+          // New SW installed and waiting — force activate immediately
+          newWorker.postMessage({type:'SKIP_WAITING'});
+        }
+      });
+    });
+  });
+  // When new SW takes control, reload to ensure fresh push handler is active
+  var refreshing=false;
+  navigator.serviceWorker.addEventListener('controllerchange',function(){
+    if(!refreshing){refreshing=true;window.location.reload();}
+  });
+}
+            `,
           }}
         />
       </head>
