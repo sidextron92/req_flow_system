@@ -137,21 +137,33 @@ function resolveType(
 }
 
 // ── Rule engine: resolve assigned_to_user_id before saving ────
-// bijnis_buyer_id and supply_tl_id are sourced from the fuzzy-search step
-// and forwarded in the PATCH payload — no additional DB query needed.
-// Priority: product_id match → label_id (brand_id) match → null
-function resolveAssignee(
+// Priority:
+//   1. product_id match → bijnis_buyer_id
+//   2. label_id match   → supply_tl_id
+//   3. category fallback → category_buyer_defaults lookup
+//   4. null
+async function resolveAssignee(
   products: Product[] | undefined,
   label_id: string | null | undefined,
   bijnis_buyer_id: string | null | undefined,
   supply_tl_id: string | null | undefined,
-): number | null {
+  category_name: string | null | undefined,
+): Promise<number | null> {
   const hasProductId = products?.some((p) => p.product_id);
   if (hasProductId && bijnis_buyer_id && !Number.isNaN(Number(bijnis_buyer_id))) {
     return Number(bijnis_buyer_id);
   }
   if (label_id && supply_tl_id && !Number.isNaN(Number(supply_tl_id))) {
     return Number(supply_tl_id);
+  }
+  // Category fallback: check category_buyer_defaults
+  if (category_name) {
+    const { data } = await supabaseAdmin
+      .from("category_buyer_defaults")
+      .select("user_id")
+      .eq("category_name", category_name)
+      .single();
+    if (data?.user_id) return Number(data.user_id);
   }
   return null;
 }
@@ -172,7 +184,7 @@ export async function PATCH(
   const { userId, label_name, label_id, category_name, expiry_date, qty_required, remarks, products, bijnis_buyer_id, supply_tl_id, extracted_data, model_used } = body;
 
   // ── 1. Resolve assignee via rule engine ────────────────────
-  const assigneeId = resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id);
+  const assigneeId = await resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id, category_name);
 
   // ── 2. Correct requirement type based on catalog matches ───
   const correctedType = resolveType(products, label_id);

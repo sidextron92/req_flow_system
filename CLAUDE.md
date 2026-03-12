@@ -254,16 +254,23 @@ model_used
 
 #### 5.1 Assignment rule engine (`resolveAssignee`) — runs first, before any DB write
 
-Priority order:
+`resolveAssignee` is async — priority order:
 
-| Condition | Action |
-|-----------|--------|
-| Any product in `products[]` has a non-null `product_id` **AND** `bijnis_buyer_id` is a valid number | `assigned_to_user_id = bijnis_buyer_id` (as BIGINT) |
-| No valid product match, but `label_id` is set **AND** `supply_tl_id` is a valid number | `assigned_to_user_id = supply_tl_id` (as BIGINT) |
-| Neither condition met | `assigned_to_user_id = NULL` |
+| Priority | Condition | Action |
+|----------|-----------|--------|
+| 1 | Any product in `products[]` has a non-null `product_id` **AND** `bijnis_buyer_id` is a valid number | `assigned_to_user_id = bijnis_buyer_id` (as BIGINT) |
+| 2 | No valid product match, but `label_id` is set **AND** `supply_tl_id` is a valid number | `assigned_to_user_id = supply_tl_id` (as BIGINT) |
+| 3 | Neither product nor label matched, but `category_name` has a row in `category_buyer_defaults` | `assigned_to_user_id = category_buyer_defaults.user_id` |
+| 4 | None of the above | `assigned_to_user_id = NULL` |
 
 When an assignment is resolved, `assigned_date` is also set to `NOW()`.
 `bijnis_buyer_id` and `supply_tl_id` are validated with `!isNaN(Number(id))` before casting to BIGINT, so non-numeric values from dirty catalog data are safely ignored.
+
+**`category_buyer_defaults` table** — stores the category → default bijnisBuyer mapping used by priority 3:
+- `category_name TEXT PRIMARY KEY` — matches values in `CATEGORY_LIST` exactly
+- `user_id BIGINT NOT NULL REFERENCES users(id)` — the bijnisBuyer to assign
+- One row per category (one-to-one). Categories without a row fall through to NULL.
+- Seeded with 14 mappings: Boots, Crocks, Formals, Jeans, Loafers, Sandals, School Shoes, Shirts, Shorts, Slippers, Sneakers, Sports, T-Shirts, Track Pants.
 
 #### 5.2 Requirement type correction (`resolveType`) — runs after `resolveAssignee`
 
