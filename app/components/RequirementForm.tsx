@@ -113,12 +113,42 @@ export default function RequirementForm({
     }
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function compressImage(file: File): Promise<File> {
+    const MAX_BYTES = 3 * 1024 * 1024; // 3 MB
+    const MAX_DIM = 1500;
+    if (file.size <= MAX_BYTES) return file;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        let { width, height } = img;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width >= height) { height = Math.round((height * MAX_DIM) / width); width = MAX_DIM; }
+          else { width = Math.round((width * MAX_DIM) / height); height = MAX_DIM; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => resolve(blob ? new File([blob], file.name, { type: "image/jpeg" }) : file),
+          "image/jpeg",
+          0.82,
+        );
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    const newImages = files.map((file) => ({
-      id: `${file.name}-${Date.now()}`,
+    const compressed = await Promise.all(files.map(compressImage));
+    const newImages = compressed.map((file, i) => ({
+      id: `${files[i].name}-${Date.now()}`,
       url: URL.createObjectURL(file),
-      name: file.name,
+      name: files[i].name,
       file,
     }));
     setImages((prev) => [...prev, ...newImages]);
