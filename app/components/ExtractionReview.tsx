@@ -1,18 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getSystemPrompt, CATEGORY_NAMES } from "@/lib/ai.config";
+import { CATEGORY_NAMES } from "@/lib/ai.config";
 import { validateExtraction, type ValidationResult } from "@/lib/extraction-validation";
 
 interface ExtractionReviewProps {
   requirementId: string;
   requirementType: string;   // DB enum value e.g. "RESTOCK"
   userId: string;
-  notes: string;
-  storagePaths: string[];
   initialExtraction: Record<string, unknown> | null;
   modelUsed: string | null;
-  initialAiError: string | null;
   onClose: () => void;
   onSaved: () => void;       // called after successful Done → triggers list refresh
 }
@@ -42,21 +39,14 @@ export default function ExtractionReview({
   requirementId,
   requirementType,
   userId,
-  notes,
-  storagePaths,
   initialExtraction,
   modelUsed,
-  initialAiError,
   onClose,
   onSaved,
 }: ExtractionReviewProps) {
-  // ── Extraction / re-run state ──────────────────────────────
-  const [systemPrompt, setSystemPrompt]     = useState(() => getSystemPrompt(requirementType));
+  // ── Extraction state ────────────────────────────────────────
   const [extraction, setExtraction]         = useState(initialExtraction);
-  const [currentModel, setCurrentModel]     = useState(modelUsed);
-  const [isRerunning, setIsRerunning]       = useState(false);
-  const [rerunError, setRerunError]         = useState<string | null>(initialAiError);
-  const [showPromptEditor, setShowPromptEditor] = useState(false);
+  const currentModel                        = modelUsed;
 
   // ── Done / save state ──────────────────────────────────────
   const [isSaving, setIsSaving]             = useState(false);
@@ -101,36 +91,6 @@ export default function ExtractionReview({
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
-
-  // ── Re-run extraction ──────────────────────────────────────
-  async function handleRerun() {
-    setIsRerunning(true);
-    setRerunError(null);
-
-    try {
-      const res = await fetch("/api/ai/re-extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requirementId, requirementType, notes, systemPrompt, storagePaths }),
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        setRerunError(json.error ?? "Re-extraction failed");
-        return;
-      }
-
-      setExtraction(json.data.extracted_data);
-      setCurrentModel(json.data.model_used);
-      setCategoryCheckDone(false);
-      setCategorySuggestions([]);
-    } catch {
-      setRerunError("Network error — please try again");
-    } finally {
-      setIsRerunning(false);
-    }
-  }
 
   // ── Save to DB ─────────────────────────────────────────────
   async function saveRequirement(
@@ -1201,15 +1161,7 @@ export default function ExtractionReview({
               ) : (
                 <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex flex-col gap-1">
                   <p className="text-sm text-red-700 font-medium">Extraction failed</p>
-                  {rerunError
-                    ? <p className="text-xs text-red-600 font-mono break-all">{rerunError}</p>
-                    : <p className="text-xs text-red-500">Edit the system prompt or check your API key, then re-run.</p>}
-                </div>
-              )}
-
-              {extraction && rerunError && (
-                <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-                  <p className="text-xs text-red-600 font-mono break-all">{rerunError}</p>
+                  <p className="text-xs text-red-500">Check your API key and try again.</p>
                 </div>
               )}
 
@@ -1218,57 +1170,13 @@ export default function ExtractionReview({
                   <p className="text-xs text-red-600">{saveError}</p>
                 </div>
               )}
-
-              {/* System prompt editor */}
-              <div className="border-t border-gray-100 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowPromptEditor((v) => !v)}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-green-600"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className={`w-3.5 h-3.5 transition-transform ${showPromptEditor ? "rotate-90" : ""}`}
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                  {showPromptEditor ? "Hide" : "Edit"} System Prompt
-                </button>
-
-                {showPromptEditor && (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <textarea
-                      value={systemPrompt}
-                      onChange={(e) => setSystemPrompt(e.target.value)}
-                      rows={10}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 font-mono focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSystemPrompt(getSystemPrompt(requirementType))}
-                      className="self-end text-xs text-gray-400 underline"
-                    >
-                      Reset to default
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
 
             <div className="flex gap-2 px-4 py-4 border-t border-gray-100 flex-shrink-0">
               <button
                 type="button"
-                onClick={handleRerun}
-                disabled={isRerunning || isSaving}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
-              >
-                {isRerunning ? "Running..." : "Re-run"}
-              </button>
-              <button
-                type="button"
                 onClick={handleDone}
-                disabled={!extraction || isSaving || isRerunning || isFuzzyChecking}
+                disabled={!extraction || isSaving || isFuzzyChecking}
                 className="flex-1 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
               >
                 {isFuzzyChecking ? "Checking..." : isSaving ? "Saving..." : "Done"}

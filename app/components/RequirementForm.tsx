@@ -540,11 +540,8 @@ export default function RequirementForm({
           requirementId={extraction.requirementId}
           requirementType={extraction.requirementType}
           userId={String(userId)}
-          notes={notes}
-          storagePaths={extraction.storagePaths}
           initialExtraction={extraction.extractedData}
           modelUsed={extraction.modelUsed}
-          initialAiError={extraction.aiError}
           onClose={handleExtractionClose}
           onSaved={onSubmitSuccess}
         />
