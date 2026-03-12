@@ -310,7 +310,13 @@ export default function ExtractionReview({
 
   async function handleFuzzySkip() {
     if (!pendingExtractionRef.current) return;
-    const ok = await saveRequirement(pendingExtractionRef.current);
+    // Apply the pre-resolved label exact match even when user skips product selection.
+    // "Save as typed" means products are not catalog-resolved, but an exact label match
+    // was already silently found and should not be discarded.
+    const baseExtraction = selectedLabel?.id
+      ? { ...pendingExtractionRef.current, label_id: selectedLabel.id, label_name: selectedLabel.name }
+      : pendingExtractionRef.current;
+    const ok = await saveRequirement(baseExtraction, null, selectedLabel?.supply_tl_id ?? null);
     if (ok) { setView("success"); onSaved(); }
   }
 
