@@ -34,7 +34,8 @@ export async function sendPushNotification(
     try {
       await webpush.sendNotification(
         pushSubscription,
-        JSON.stringify(payload)
+        JSON.stringify(payload),
+        { TTL: 3600, urgency: "high" } // high urgency = FCM delivers immediately even with screen off
       );
     } catch (sendErr: unknown) {
       // Remove stale subscription
