@@ -1020,7 +1020,16 @@ function DetailContent() {
   const { id }       = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const router       = useRouter();
-  const userId       = Number(searchParams.get("userId") ?? 0);
+
+  // Fall back to localStorage so push notification deep links work from PWA home screen
+  const userIdParam = searchParams.get("userId");
+  const userId = userIdParam
+    ? Number(userIdParam)
+    : Number(
+        typeof window !== "undefined"
+          ? (localStorage.getItem("reqflow_userId") ?? 0)
+          : 0
+      );
 
   const [req, setReq]                             = useState<Requirement | null>(null);
   const [statusUpdates, setStatusUpdates]         = useState<StatusUpdateEntry[]>([]);

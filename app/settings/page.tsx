@@ -33,7 +33,8 @@ function formatDate(iso: string): string {
 function SettingsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const userId = searchParams.get("userId");
+  const userId = searchParams.get("userId") ??
+    (typeof window !== "undefined" ? localStorage.getItem("reqflow_userId") : null);
 
   const [status, setStatus] = useState<SubStatus>({ loading: true });
   const [working, setWorking] = useState(false);

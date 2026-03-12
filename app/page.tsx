@@ -658,7 +658,18 @@ function FilterPills({
 function HomeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const userId = Number(searchParams.get("userId") ?? 0);
+
+  // Persist userId in localStorage so PWA home screen shortcut works without URL params
+  const userIdParam = searchParams.get("userId");
+  const userId = useMemo(() => {
+    if (typeof window === "undefined") return 0;
+    if (userIdParam) {
+      const n = Number(userIdParam);
+      if (n) localStorage.setItem("reqflow_userId", String(n));
+      return n;
+    }
+    return Number(localStorage.getItem("reqflow_userId") ?? 0);
+  }, [userIdParam]);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
