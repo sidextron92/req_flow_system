@@ -4,7 +4,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title ?? "Req Flow", {
       body: data.body ?? "",
       icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      badge: "/push-badge.png",
       data: { url: data.url ?? "/" },
     })
   );
