@@ -251,7 +251,7 @@ export async function PATCH(
         await sendPushNotification(assigneeId, {
           title: "New requirement assigned to you",
           body: `${correctedType.replace("_", " ")} · ${label_name ?? category_name ?? "New requirement"}`,
-          url: `/requirements/${requirementId}`,
+          url: `/requirements/${requirementId}?userId=${assigneeId}`,
         });
       } catch {
         // Notification failure must not affect the API response

@@ -117,7 +117,7 @@ export async function PATCH(
 
       await sendPushNotification(notifyUserId, {
         ...msg,
-        url: `/requirements/${requirementId}`,
+        url: `/requirements/${requirementId}?userId=${notifyUserId}`,
       });
     } catch {
       // Notification failure must not affect the API response

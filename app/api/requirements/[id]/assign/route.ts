@@ -142,7 +142,7 @@ export async function PATCH(
       await sendPushNotification(newAssigneeIdNum, {
         title: "Requirement reassigned to you",
         body: label,
-        url: `/requirements/${requirementId}`,
+        url: `/requirements/${requirementId}?userId=${newAssigneeIdNum}`,
       });
     } catch {
       // Notification failure must not affect the API response
