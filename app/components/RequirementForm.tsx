@@ -371,7 +371,7 @@ export default function RequirementForm({
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              multiple
+              capture="environment"
               className="hidden"
               onChange={handleFileChange}
               disabled={isSubmitting}
@@ -383,9 +383,10 @@ export default function RequirementForm({
               className="flex items-center justify-center gap-2 w-full border-2 border-dashed border-gray-300 rounded-xl py-4 text-sm text-gray-500 hover:border-green-400 hover:text-green-500 transition-colors disabled:opacity-50"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
               </svg>
-              Add Images
+              Take Photo
             </button>
           </div>
 

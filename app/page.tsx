@@ -806,7 +806,10 @@ function HomeContent() {
         {/* Header */}
         <header className="bg-white border-b border-gray-200 px-4 py-5 sticky top-0 z-10">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Req Flow</h1>
+            <div className="flex items-center gap-2">
+              <img src="/apple-touch-icon.png" alt="ReqFlow logo" className="w-8 h-8 rounded-lg" />
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Req Flow</h1>
+            </div>
             {userId ? (
               <a
                 href={`/settings?userId=${userId}`}
