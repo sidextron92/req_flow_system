@@ -31,6 +31,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Capture beforeinstallprompt before React mounts so the prompt isn't lost */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;});`,
+          }}
+        />
+      </head>
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
       >
