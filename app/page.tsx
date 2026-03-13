@@ -665,7 +665,12 @@ function HomeContent() {
     if (typeof window === "undefined") return 0;
     if (userIdParam) {
       const n = Number(userIdParam);
-      if (n) localStorage.setItem("reqflow_userId", String(n));
+      if (n) {
+        localStorage.setItem("reqflow_userId", String(n));
+        // Also set a cookie so the server-side /api/manifest route can read it
+        // and bake the userId into start_url — fixes iOS PWA home screen launch
+        document.cookie = `reqflow_userId=${n}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+      }
       return n;
     }
     return Number(localStorage.getItem("reqflow_userId") ?? 0);
