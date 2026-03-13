@@ -11,7 +11,4 @@ export default withPWA({
   aggressiveFrontEndNavCaching: true,
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === "development",
-  // Exclude the dynamic manifest from precaching so the SW always fetches it
-  // fresh from the server (which reads the userId cookie for the correct start_url)
-  exclude: [/\/api\/manifest/],
 })(nextConfig);
