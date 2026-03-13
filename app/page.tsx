@@ -684,6 +684,7 @@ function HomeContent() {
   const [assignedRequirements, setAssignedReqs] = useState<AssignedRequirement[]>([]);
   const [assignedLoading, setAssignedLoading]   = useState(false);
   const [userRole, setUserRole]                 = useState<string | null>(null);
+  const [userName, setUserName]                 = useState<string | null>(null);
   const [formOpen, setFormOpen]                 = useState(false);
   const [activeFilter, setActiveFilter]         = useState<FilterKey>("all_open");
   const [sort, setSort]                         = useState<SortOption>("created_desc");
@@ -723,6 +724,7 @@ function HomeContent() {
     if (userResult.status === "fulfilled" && userResult.value.ok) {
       const json = await userResult.value.json();
       setUserRole(json.data?.role ?? null);
+      setUserName(json.data?.name ?? null);
     }
   }, [userId]);
 
@@ -824,7 +826,10 @@ function HomeContent() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <img src="/apple-touch-icon.png" alt="ReqFlow logo" className="w-8 h-8 rounded-lg" />
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Req Flow</h1>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Req Flow</h1>
+                {userName && <p className="text-xs text-gray-400">Welcome {userName}</p>}
+              </div>
             </div>
             {userId ? (
               <a
