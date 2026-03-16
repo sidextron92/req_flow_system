@@ -1038,7 +1038,8 @@ function DetailContent() {
   const [assignedUser, setAssignedUser]           = useState<AssignedUser | null>(null);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
-  const [activeTab, setActiveTab]       = useState<"requirement" | "chat">("requirement");
+  const openChat = searchParams.get("openChat") === "true";
+  const [activeTab, setActiveTab]       = useState<"requirement" | "chat">(openChat ? "chat" : "requirement");
   const [showReassignSheet, setShowReassignSheet] = useState(false);
   const [toast, setToast]               = useState<string | null>(null);
 

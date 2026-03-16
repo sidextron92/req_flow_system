@@ -180,13 +180,22 @@ function DaysLeftBadge({ expiry }: { expiry: string | null }) {
 
 // ─── Requirement Card ─────────────────────────────────────────────────────────
 
-function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => void }) {
+function RequirementCard({
+  req,
+  onClick,
+  onChatClick,
+}: {
+  req: Requirement;
+  onClick: () => void;
+  onChatClick: (e: React.MouseEvent) => void;
+}) {
   const qtyNote = req.requirement_products
     .map((p) => p.notes)
     .filter(Boolean)
     .join(" · ");
 
   const title = req.label_name ?? req.category_name ?? "—";
+  const commentCount = req.comment_log?.length ?? 0;
 
   return (
     <li
@@ -224,13 +233,31 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
         </div>
       )}
 
-      {(req.remarks || qtyNote) && (
-        <p className="text-xs text-gray-500 leading-snug line-clamp-2">
-          {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      )}
+      <div className="flex items-center justify-between">
+        {(req.remarks || qtyNote) ? (
+          <p className="text-xs text-gray-500 leading-snug line-clamp-2 flex-1 mr-2">
+            {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : <span />}
+
+        <button
+          onClick={onChatClick}
+          className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors active:scale-95 ${
+            commentCount > 0
+              ? "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+              : "bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200"
+          }`}
+          aria-label={`Open chat (${commentCount} messages)`}
+        >
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <span>{commentCount > 0 ? commentCount : "Chat"}</span>
+        </button>
+      </div>
     </li>
   );
 }
@@ -240,9 +267,11 @@ function RequirementCard({ req, onClick }: { req: Requirement; onClick: () => vo
 function AssignedRequirementCard({
   req,
   onClick,
+  onChatClick,
 }: {
   req: AssignedRequirement;
   onClick: () => void;
+  onChatClick: (e: React.MouseEvent) => void;
 }) {
   const qtyNote = req.requirement_products
     .map((p) => p.notes)
@@ -253,6 +282,7 @@ function AssignedRequirementCard({
   const creatorLine = [req.created_by_name, req.created_by_darkstore]
     .filter(Boolean)
     .join(" · ");
+  const commentCount = req.comment_log?.length ?? 0;
 
   return (
     <li
@@ -290,13 +320,29 @@ function AssignedRequirementCard({
         </div>
       )}
 
-      {(req.remarks || qtyNote) && (
-        <p className="text-xs text-gray-500 leading-snug line-clamp-2">
-          {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      )}
+      <div className="flex items-center justify-between">
+        {(req.remarks || qtyNote) ? (
+          <p className="text-xs text-gray-500 leading-snug line-clamp-2 flex-1 mr-2">
+            {[req.remarks, qtyNote ? `Qty: ${qtyNote}` : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : <span />}
+
+        <button
+          onClick={onChatClick}
+          className="shrink-0 flex items-center gap-1 text-gray-400 hover:text-gray-600 active:text-gray-800 transition-colors p-1 -m-1"
+          aria-label={`Open chat (${commentCount} messages)`}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          {commentCount > 0 && (
+            <span className="text-xs font-semibold text-gray-500">{commentCount}</span>
+          )}
+        </button>
+      </div>
     </li>
   );
 }
@@ -921,6 +967,10 @@ function HomeContent() {
                       onClick={() =>
                         router.push(`/requirements/${req.id}?userId=${userId}&tab=${activeTab}`)
                       }
+                      onChatClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/requirements/${req.id}?userId=${userId}&tab=${activeTab}&openChat=true`);
+                      }}
                     />
                   ) : (
                     <AssignedRequirementCard
@@ -929,6 +979,10 @@ function HomeContent() {
                       onClick={() =>
                         router.push(`/requirements/${req.id}?userId=${userId}&tab=${activeTab}`)
                       }
+                      onChatClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/requirements/${req.id}?userId=${userId}&tab=${activeTab}&openChat=true`);
+                      }}
                     />
                   )
                 )}
