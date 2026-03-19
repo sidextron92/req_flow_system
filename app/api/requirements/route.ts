@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { toDBType } from "@/lib/requirement-type.map";
-import { runExtraction } from "@/lib/ai.service";
 
 const AUDIO_BUCKET = "reqflow_audio";
 
@@ -45,7 +44,6 @@ export async function POST(req: NextRequest) {
   const categoryName = formData.get("categoryName") as string | null;
   const expiryDate  = formData.get("expiryDate") as string | null;
   const remarks     = formData.get("remarks") as string | null;
-  const notes       = formData.get("notes") as string | null;
 
   // Products — sent as JSON string
   const productsRaw = formData.get("products") as string | null;
@@ -59,33 +57,35 @@ export async function POST(req: NextRequest) {
   // Map UI type → DB enum
   const type = toDBType(typeRaw);
 
-  // ── Upload images to Supabase Storage ──────────────────────
+  // ── Upload images to Supabase Storage (parallel) ───────────
   const imageFiles = formData.getAll("images") as File[];
   const attachments: { url: string; file_name: string; storage_path: string }[] = [];
-  // Keep base64 in memory for AI — we encode after upload to avoid reading twice
-  const imagePayloads: { base64: string; mimeType: string }[] = [];
 
-  for (const file of imageFiles) {
-    const ext = file.name.split(".").pop();
-    const storagePath = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const imageUploadResults = await Promise.all(
+    imageFiles.map(async (file) => {
+      const ext = file.name.split(".").pop();
+      const storagePath = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const buffer = Buffer.from(await file.arrayBuffer());
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .upload(storagePath, buffer, { contentType: file.type, upsert: false });
 
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, buffer, { contentType: file.type, upsert: false });
+      if (uploadError) return { error: uploadError.message };
 
-    if (uploadError) {
-      return NextResponse.json({ error: `Image upload failed: ${uploadError.message}` }, { status: 500 });
+      const { data: urlData } = supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .getPublicUrl(storagePath);
+
+      return { attachment: { url: urlData.publicUrl, file_name: file.name, storage_path: storagePath } };
+    })
+  );
+
+  for (const result of imageUploadResults) {
+    if ("error" in result) {
+      return NextResponse.json({ error: `Image upload failed: ${result.error}` }, { status: 500 });
     }
-
-    const { data: urlData } = supabaseAdmin.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
-
-    attachments.push({ url: urlData.publicUrl, file_name: file.name, storage_path: storagePath });
-    imagePayloads.push({ base64: buffer.toString("base64"), mimeType: file.type });
+    attachments.push(result.attachment);
   }
 
   // ── Upload voice note + transcribe ─────────────────────────
@@ -165,43 +165,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Run AI extraction ──────────────────────────────────────
-  let extractedData: Record<string, unknown> | null = null;
-  let modelUsed: string | null = null;
-  let aiError: string | null = null;
-
-  try {
-    const extraction = await runExtraction({
-      requirementType: type,
-      notes: notes ?? "",
-      images: imagePayloads,
-    });
-
-    extractedData = extraction.extracted_data;
-    modelUsed = extraction.model_used;
-
-    // Persist extraction
-    await supabaseAdmin.from("ai_extractions").insert({
-      requirement_id: requirementId,
-      extracted_data: extractedData,
-      model_used:     modelUsed,
-    });
-  } catch (err) {
-    // AI failure is non-fatal — requirement is already saved
-    aiError = err instanceof Error ? err.message : String(err);
-    console.error("AI extraction failed:", aiError);
-  }
-
   return NextResponse.json(
     {
       data: {
-        id:             requirementId,
-        extracted_data: extractedData,
-        model_used:     modelUsed,
-        ai_error:       aiError,
-        // Pass back storage paths so UI can send them for re-extraction
+        id:            requirementId,
         // Image paths are plain strings; voice path is prefixed with "audio:"
-        storage_paths:  attachments.map((a) => a.storage_path),
+        storage_paths: attachments.map((a) => a.storage_path),
       },
     },
     { status: 201 }

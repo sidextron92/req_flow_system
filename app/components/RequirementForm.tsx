@@ -69,6 +69,7 @@ export default function RequirementForm({
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<ExtractionState | null>(null);
 
@@ -114,8 +115,8 @@ export default function RequirementForm({
   }
 
   async function compressImage(file: File): Promise<File> {
-    const MAX_BYTES = 3 * 1024 * 1024; // 3 MB
-    const MAX_DIM = 1500;
+    const MAX_BYTES = 800 * 1024; // 800 KB — compress anything above this
+    const MAX_DIM = 1000;         // 1000px max — sufficient for AI vision
     if (file.size <= MAX_BYTES) return file;
 
     return new Promise((resolve) => {
@@ -135,7 +136,7 @@ export default function RequirementForm({
         canvas.toBlob(
           (blob) => resolve(blob ? new File([blob], file.name, { type: "image/jpeg" }) : file),
           "image/jpeg",
-          0.82,
+          0.75,
         );
       };
       img.src = objectUrl;
@@ -245,12 +246,17 @@ export default function RequirementForm({
     setImages([]);
     setNotes("");
     setSubmitError(null);
+    setIsExtracting(false);
   }
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
-    setIsSubmitting(true);
     setSubmitError(null);
+
+    // ── Step 1: Upload files + create requirement ──────────────
+    setIsSubmitting(true);
+    let requirementId: string;
+    let storagePaths: string[];
 
     try {
       const formData = new FormData();
@@ -263,7 +269,6 @@ export default function RequirementForm({
       }
 
       if (voiceNote) {
-        // Derive a sensible file extension from MIME type
         const ext = voiceNote.mimeType.includes("mp4") ? "mp4"
           : voiceNote.mimeType.includes("ogg") ? "ogg"
           : "webm";
@@ -283,22 +288,65 @@ export default function RequirementForm({
         return;
       }
 
-      const { id, extracted_data, model_used, storage_paths, ai_error } = json.data;
-
+      requirementId = json.data.id;
+      storagePaths  = json.data.storage_paths ?? [];
       onSubmitSuccess();
+    } catch {
+      setSubmitError("Network error — please try again.");
+      return;
+    } finally {
+      setIsSubmitting(false);
+    }
 
+    // ── Step 2: Run AI extraction ──────────────────────────────
+    setIsExtracting(true);
+    try {
+      const res = await fetch(`/api/requirements/${requirementId}/extract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requirementType: toDBType(type),
+          notes,
+          storagePaths,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        // Extraction failed but requirement was saved — open review with null extraction
+        setExtraction({
+          requirementId,
+          requirementType: toDBType(type),
+          storagePaths,
+          extractedData:   null,
+          modelUsed:       null,
+          aiError:         json.error ?? "Extraction failed",
+        });
+        return;
+      }
+
+      const { extracted_data, model_used, ai_error } = json.data;
       setExtraction({
-        requirementId:   id,
+        requirementId,
         requirementType: toDBType(type),
-        storagePaths:    storage_paths ?? [],
+        storagePaths,
         extractedData:   extracted_data,
         modelUsed:       model_used,
         aiError:         ai_error ?? null,
       });
     } catch {
-      setSubmitError("Network error — please try again.");
+      // Network error during extraction — requirement is saved, open review with no data
+      setExtraction({
+        requirementId,
+        requirementType: toDBType(type),
+        storagePaths,
+        extractedData:   null,
+        modelUsed:       null,
+        aiError:         "Network error during extraction",
+      });
     } finally {
-      setIsSubmitting(false);
+      setIsExtracting(false);
     }
   }
 
@@ -313,7 +361,7 @@ export default function RequirementForm({
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/40 z-20"
-        onClick={extraction ? undefined : () => { stopRecording(); onClose(); }}
+        onClick={extraction || isSubmitting || isExtracting ? undefined : () => { stopRecording(); onClose(); }}
       />
 
       {/* Bottom Sheet */}
@@ -330,7 +378,7 @@ export default function RequirementForm({
             onClick={() => { stopRecording(); onClose(); }}
             className="text-gray-400 hover:text-gray-600 p-1 rounded-full"
             aria-label="Close"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isExtracting}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -574,16 +622,16 @@ export default function RequirementForm({
           {/* Submit */}
           <button
             type="submit"
-            disabled={isSubmitting || isRecording || isTranscribing}
+            disabled={isSubmitting || isExtracting || isRecording || isTranscribing}
             className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-base py-4 rounded-2xl transition-colors shadow-sm mt-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {isSubmitting ? (
+            {(isSubmitting || isExtracting) ? (
               <>
                 <svg className="animate-spin w-4 h-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
-                Saving &amp; Extracting...
+                {isSubmitting ? "Saving..." : "Extracting..."}
               </>
             ) : (
               "Submit Requirement"
