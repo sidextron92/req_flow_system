@@ -57,6 +57,13 @@ interface Requirement {
 interface AssignedUser {
   name: string;
   role: string;
+  phone: string | null;
+}
+
+interface CreatedByUser {
+  name: string;
+  phone: string | null;
+  darkstore_name: string | null;
 }
 
 interface BijnisBuyer {
@@ -548,9 +555,29 @@ function Toast({ message, onDismiss }: { message: string; onDismiss: () => void 
 
 // ─── Collapsible Overview ─────────────────────────────────────────────────────
 
+function CallButton({ phone }: { phone: string | null }) {
+  if (!phone) {
+    return (
+      <span className="text-xs text-red-400">Phone not available</span>
+    );
+  }
+  return (
+    <a
+      href={`tel:${phone}`}
+      className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+    >
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 8V5z" />
+      </svg>
+      Call
+    </a>
+  );
+}
+
 function CollapsibleOverview({
   req,
   assignedUser,
+  createdByUser,
   userId,
   userRole,
   onStatusChange,
@@ -558,6 +585,7 @@ function CollapsibleOverview({
 }: {
   req: Requirement;
   assignedUser: AssignedUser | null;
+  createdByUser: CreatedByUser | null;
   userId: number;
   userRole: string;
   onStatusChange: (newStatus: string) => void;
@@ -606,20 +634,18 @@ function CollapsibleOverview({
       {/* Expandable details */}
       {isOpen && (
         <div className="border-t border-gray-100 px-4 py-4 flex flex-col gap-4">
-          {/* Assignment */}
-          {(req.assigned_to_user_id || req.assigned_date) && (
+
+          {/* "By me" context: show assignee info + call CTA */}
+          {req.created_by === userId && req.assigned_to_user_id && (
             <div className="flex flex-col gap-2">
               <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                {req.assigned_to_user_id && (
-                  <Row
-                    label="Assigned to"
-                    value={
-                      assignedUser
-                        ? `${assignedUser.name} (${assignedUser.role})`
-                        : `User ${req.assigned_to_user_id}`
-                    }
-                  />
-                )}
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-gray-400">Assigned to</span>
+                  <span className="text-sm font-medium text-gray-800">
+                    {assignedUser ? assignedUser.name : `User ${req.assigned_to_user_id}`}
+                  </span>
+                  <CallButton phone={assignedUser?.phone ?? null} />
+                </div>
                 {req.assigned_date && (
                   <Row label="Assigned on" value={formatDate(req.assigned_date)} />
                 )}
@@ -636,6 +662,23 @@ function CollapsibleOverview({
                 </button>
               )}
             </div>
+          )}
+
+          {/* "For me" context: show creator info + call CTA */}
+          {req.assigned_to_user_id === userId && createdByUser && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-400">Created by</span>
+              <span className="text-sm font-medium text-gray-800">{createdByUser.name}</span>
+              {createdByUser.darkstore_name && (
+                <span className="text-xs text-gray-500">{createdByUser.darkstore_name}</span>
+              )}
+              <CallButton phone={createdByUser.phone} />
+            </div>
+          )}
+
+          {/* "For me" context: assigned on date */}
+          {req.assigned_to_user_id === userId && req.assigned_date && (
+            <Row label="Assigned on" value={formatDate(req.assigned_date)} />
           )}
 
           {/* Created / Updated */}
@@ -1036,6 +1079,7 @@ function DetailContent() {
   const [userName, setUserName]                   = useState<string>("");
   const [userRole, setUserRole]                   = useState<string>("");
   const [assignedUser, setAssignedUser]           = useState<AssignedUser | null>(null);
+  const [createdByUser, setCreatedByUser]         = useState<CreatedByUser | null>(null);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const openChat = searchParams.get("openChat") === "true";
@@ -1058,7 +1102,7 @@ function DetailContent() {
       setReq(reqData);
       setStatusUpdates(reqJson.status_updates ?? []);
 
-      let currentUserData: { name: string; role: string } | null = null;
+      let currentUserData: { name: string; role: string; phone: string | null; darkstore_name: string | null } | null = null;
       if (userRes?.ok) {
         const userJson = await userRes.json();
         currentUserData = userJson.data ?? null;
@@ -1069,24 +1113,50 @@ function DetailContent() {
         setUserRole("");
       }
 
-      // Fetch assignee details
+      // Fetch assignee details (shown to creator — "by me" context)
       if (reqData.assigned_to_user_id) {
         if (reqData.assigned_to_user_id === userId && currentUserData) {
           // Assigned to self — reuse already-fetched data
-          setAssignedUser({ name: currentUserData.name, role: currentUserData.role });
+          setAssignedUser({ name: currentUserData.name, role: currentUserData.role, phone: currentUserData.phone });
         } else {
           try {
             const assigneeRes = await fetch(`/api/user?userId=${reqData.assigned_to_user_id}`);
             if (assigneeRes.ok) {
               const assigneeJson = await assigneeRes.json();
               if (assigneeJson.data) {
-                setAssignedUser({ name: assigneeJson.data.name, role: assigneeJson.data.role });
+                setAssignedUser({ name: assigneeJson.data.name, role: assigneeJson.data.role, phone: assigneeJson.data.phone ?? null });
               }
             }
           } catch {
             // non-fatal — falls back to "User <id>"
           }
         }
+      }
+
+      // Fetch creator details (shown to assignee — "for me" context)
+      if (reqData.created_by && reqData.created_by !== userId) {
+        try {
+          const creatorRes = await fetch(`/api/user?userId=${reqData.created_by}`);
+          if (creatorRes.ok) {
+            const creatorJson = await creatorRes.json();
+            if (creatorJson.data) {
+              setCreatedByUser({
+                name: creatorJson.data.name,
+                phone: creatorJson.data.phone ?? null,
+                darkstore_name: creatorJson.data.darkstore_name ?? null,
+              });
+            }
+          }
+        } catch {
+          // non-fatal
+        }
+      } else if (reqData.created_by === userId && currentUserData) {
+        // Created by self — reuse already-fetched data
+        setCreatedByUser({
+          name: currentUserData.name,
+          phone: currentUserData.phone,
+          darkstore_name: currentUserData.darkstore_name,
+        });
       }
     } catch {
       setError("Failed to load requirement.");
@@ -1110,7 +1180,7 @@ function DetailContent() {
     setReq((prev) =>
       prev ? { ...prev, assigned_to_user_id: newAssigneeId } : prev
     );
-    setAssignedUser({ name: newAssigneeName, role: "bijnisBuyer" });
+    setAssignedUser({ name: newAssigneeName, role: "bijnisBuyer", phone: null });
     setToast(`Reassigned to ${newAssigneeName}`);
   }
 
@@ -1198,6 +1268,7 @@ function DetailContent() {
           <CollapsibleOverview
             req={req}
             assignedUser={assignedUser}
+            createdByUser={createdByUser}
             userId={userId}
             userRole={userRole}
             onStatusChange={handleStatusChange}

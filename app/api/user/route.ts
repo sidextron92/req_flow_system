@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, name, role")
+    .select("id, name, role, phone, darkstore_name")
     .eq("id", userId)
     .single();
 
