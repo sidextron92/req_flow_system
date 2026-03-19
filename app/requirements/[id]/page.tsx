@@ -637,48 +637,54 @@ function CollapsibleOverview({
 
           {/* "By me" context: show assignee info + call CTA */}
           {req.created_by === userId && req.assigned_to_user_id && (
-            <div className="flex flex-col gap-2">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-gray-400">Assigned to</span>
-                  <span className="text-sm font-medium text-gray-800">
-                    {assignedUser ? assignedUser.name : `User ${req.assigned_to_user_id}`}
-                  </span>
-                  <CallButton phone={assignedUser?.phone ?? null} />
-                </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-400">Assigned to</span>
+                <span className="text-sm font-medium text-gray-800">
+                  {assignedUser ? assignedUser.name : `User ${req.assigned_to_user_id}`}
+                </span>
+                <CallButton phone={assignedUser?.phone ?? null} />
+              </div>
+              {req.assigned_date && (
+                <Row label="Assigned on" value={formatDate(req.assigned_date)} />
+              )}
+            </div>
+          )}
+
+          {/* "For me" context: assignee + creator side by side */}
+          {req.assigned_to_user_id === userId && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-400">Assigned to</span>
+                <span className="text-sm font-medium text-gray-800">
+                  {assignedUser ? assignedUser.name : `User ${req.assigned_to_user_id}`}
+                </span>
                 {req.assigned_date && (
-                  <Row label="Assigned on" value={formatDate(req.assigned_date)} />
+                  <span className="text-xs text-gray-500">{formatDate(req.assigned_date)}</span>
+                )}
+                {canReassign && (
+                  <button
+                    onClick={onReassign}
+                    className="self-start flex items-center gap-1.5 text-xs font-medium text-green-600 hover:text-green-700 transition-colors mt-0.5"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16 17l5-5-5-5M2 12h19" />
+                    </svg>
+                    Change assignee
+                  </button>
                 )}
               </div>
-              {canReassign && (
-                <button
-                  onClick={onReassign}
-                  className="self-start flex items-center gap-1.5 text-xs font-medium text-green-600 hover:text-green-700 transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 17l5-5-5-5M2 12h19" />
-                  </svg>
-                  Change assignee
-                </button>
+              {createdByUser && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-gray-400">Created by</span>
+                  <span className="text-sm font-medium text-gray-800">{createdByUser.name}</span>
+                  {createdByUser.darkstore_name && (
+                    <span className="text-xs text-gray-500">{createdByUser.darkstore_name}</span>
+                  )}
+                  <CallButton phone={createdByUser.phone} />
+                </div>
               )}
             </div>
-          )}
-
-          {/* "For me" context: show creator info + call CTA */}
-          {req.assigned_to_user_id === userId && createdByUser && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-gray-400">Created by</span>
-              <span className="text-sm font-medium text-gray-800">{createdByUser.name}</span>
-              {createdByUser.darkstore_name && (
-                <span className="text-xs text-gray-500">{createdByUser.darkstore_name}</span>
-              )}
-              <CallButton phone={createdByUser.phone} />
-            </div>
-          )}
-
-          {/* "For me" context: assigned on date */}
-          {req.assigned_to_user_id === userId && req.assigned_date && (
-            <Row label="Assigned on" value={formatDate(req.assigned_date)} />
           )}
 
           {/* Created / Updated */}
