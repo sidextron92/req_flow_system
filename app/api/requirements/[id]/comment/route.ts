@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sendPushNotification } from "@/lib/push.service";
 
 export async function POST(
   req: NextRequest,
@@ -60,6 +61,33 @@ export async function POST(
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
   }
+
+  // Fire-and-forget push notification to the other party
+  // Only notify if both creator and assignee exist (assigned_to_user_id must be non-null)
+  (async () => {
+    const { data: requirement } = await supabaseAdmin
+      .from("requirements")
+      .select("created_by, assigned_to_user_id, label_name, category_name")
+      .eq("id", requirementId)
+      .single();
+
+    if (!requirement?.assigned_to_user_id) return; // don't notify if unassigned
+
+    const recipientId =
+      requirement.created_by === userId
+        ? requirement.assigned_to_user_id
+        : requirement.created_by;
+
+    if (!recipientId || recipientId === userId) return; // no self-notification
+
+    const label = requirement.label_name || requirement.category_name || "Requirement";
+
+    await sendPushNotification(recipientId, {
+      title: `Msg received - ${label} requirement`,
+      body: `${name}: ${comment.trim()}`,
+      url: `/requirements/${requirementId}?userId=${recipientId}`,
+    });
+  })();
 
   return NextResponse.json({ data: newEntry }, { status: 201 });
 }
