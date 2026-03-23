@@ -9,7 +9,7 @@ Darkstore requirement management app. Darkstore managers capture three types of 
 Core workflow: Manager fills a form (images + voice note + category) → AI extracts structured data → **category confidence check** (if < 70%, chat prompts user to confirm/correct category with AI-suggested pills) → chat loop fills any remaining gaps → fuzzy match against brand/product catalog → saved to DB as OPEN.
 
 ## Stack
-- **Next.js 16** App Router, TypeScript, Tailwind CSS v4
+- **Next.js 16.2** App Router, TypeScript, Tailwind CSS v4
 - **Supabase** for DB (PostgreSQL) + Storage (images)
 - **Anthropic Claude** (haiku) + **Google Gemini** — swappable via `lib/ai.config.ts`
 - **Deepgram** — Hindi voice transcription in-browser
