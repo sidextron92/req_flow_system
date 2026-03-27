@@ -1,7 +1,7 @@
 // POST /api/requirements/[id]/comment
 // Appends a comment object to the comment_log JSONB array.
 //
-// Body: { userId: number, name: string, comment: string }
+// Body: { userId: number, name: string, comment: string, attachments?: string[] }
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -13,24 +13,31 @@ export async function POST(
 ) {
   const { id: requirementId } = await params;
 
-  let body: { userId: number; name: string; comment: string };
+  let body: { userId: number; name: string; comment: string; attachments?: string[] };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { userId, name, comment } = body;
-  if (!userId || !name || !comment?.trim()) {
-    return NextResponse.json({ error: "userId, name, and comment are required" }, { status: 400 });
+  const { userId, name, comment, attachments } = body;
+  const hasText        = !!comment?.trim();
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
+  if (!userId || !name || (!hasText && !hasAttachments)) {
+    return NextResponse.json(
+      { error: "userId, name, and either comment or attachments are required" },
+      { status: 400 }
+    );
   }
 
-  const newEntry = {
+  const newEntry: Record<string, unknown> = {
     userId,
     name,
-    comment: comment.trim(),
+    comment: comment?.trim() ?? "",
     date: new Date().toISOString(),
   };
+  if (hasAttachments) newEntry.attachments = attachments;
 
   // Atomically append using Postgres jsonb concatenation
   const { error } = await supabaseAdmin.rpc("append_comment", {
@@ -63,7 +70,6 @@ export async function POST(
   }
 
   // Fire-and-forget push notification to the other party
-  // Only notify if both creator and assignee exist (assigned_to_user_id must be non-null)
   (async () => {
     const { data: requirement } = await supabaseAdmin
       .from("requirements")
@@ -71,20 +77,23 @@ export async function POST(
       .eq("id", requirementId)
       .single();
 
-    if (!requirement?.assigned_to_user_id) return; // don't notify if unassigned
+    if (!requirement?.assigned_to_user_id) return;
 
     const recipientId =
       requirement.created_by === userId
         ? requirement.assigned_to_user_id
         : requirement.created_by;
 
-    if (!recipientId || recipientId === userId) return; // no self-notification
+    if (!recipientId || recipientId === userId) return;
 
-    const label = requirement.label_name || requirement.category_name || "Requirement";
+    const label      = requirement.label_name || requirement.category_name || "Requirement";
+    const notifBody  = hasText
+      ? `${name}: ${comment!.trim()}`
+      : `${name} sent ${attachments!.length} attachment${attachments!.length > 1 ? "s" : ""}`;
 
     await sendPushNotification(recipientId, {
       title: `Msg received - ${label} requirement`,
-      body: `${name}: ${comment.trim()}`,
+      body: notifBody,
       url: `/requirements/${requirementId}?userId=${recipientId}`,
     });
   })();

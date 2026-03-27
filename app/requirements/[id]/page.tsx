@@ -18,6 +18,7 @@ interface CommentEntry {
   date: string;
   comment: string;
   isSystemUpdate?: boolean;
+  attachments?: string[];
 }
 
 interface StatusUpdateEntry {
@@ -876,6 +877,203 @@ function AttachmentsSection({ attachments }: { attachments: Attachment[] }) {
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
+const CHAT_MAX_FILES      = 3;
+const CHAT_MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+const CHAT_ALLOWED_MIME   = [
+  "image/jpeg", "image/png", "image/webp", "image/gif",
+  "application/pdf",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+];
+
+async function compressChatImage(file: File): Promise<File> {
+  const MAX_PX    = 800;
+  const MAX_BYTES = 400 * 1024;
+  const QUALITY   = 0.65;
+  if (file.size <= MAX_BYTES) return file;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if (width > MAX_PX || height > MAX_PX) {
+        if (width >= height) { height = Math.round((height * MAX_PX) / width); width = MAX_PX; }
+        else                 { width  = Math.round((width  * MAX_PX) / height); height = MAX_PX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) { resolve(file); return; }
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }));
+        },
+        "image/jpeg", QUALITY
+      );
+    };
+    img.src = objectUrl;
+  });
+}
+
+function getFileTypeLabel(url: string): string {
+  if (/\.pdf(\?|$)/i.test(url))        return "PDF";
+  if (/\.(xlsx|xls)(\?|$)/i.test(url)) return "EXCEL";
+  if (/\.csv(\?|$)/i.test(url))        return "CSV";
+  return "FILE";
+}
+
+function getChatFileName(url: string): string {
+  try {
+    const path    = decodeURIComponent(url.split("?")[0]);
+    const segment = path.split("/").pop() ?? "file";
+    return segment.replace(/^\d+-/, "");
+  } catch {
+    return "file";
+  }
+}
+
+function ImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  const [scale, setScale] = useState(1);
+  const lastDistRef       = useRef<number | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function onTouchMove(e: React.TouchEvent) {
+    if (e.touches.length !== 2) return;
+    const dx   = e.touches[0].clientX - e.touches[1].clientX;
+    const dy   = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (lastDistRef.current !== null) {
+      setScale((s) => Math.min(Math.max(s * (dist / lastDistRef.current!), 1), 4));
+    }
+    lastDistRef.current = dist;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={onClose}>
+      <div className="flex justify-between items-center px-4 py-3 shrink-0">
+        <span className="text-white/50 text-xs">Pinch to zoom</span>
+        <button
+          onClick={onClose}
+          className="text-white p-2 rounded-full bg-white/10 hover:bg-white/20"
+          aria-label="Close"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div
+        className="flex-1 flex items-center justify-center overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={() => { lastDistRef.current = null; }}
+        onTouchMove={onTouchMove}
+        onTouchEnd={() => { lastDistRef.current = null; }}
+      >
+        <img
+          src={url}
+          alt="Full preview"
+          draggable={false}
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: "center",
+            transition: "transform 0.05s ease-out",
+            maxWidth: "100%",
+            maxHeight: "100%",
+            objectFit: "contain",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FileDownloadSheet({ url, onClose }: { url: string; onClose: () => void }) {
+  const fileName = getChatFileName(url);
+  const label    = getFileTypeLabel(url);
+
+  function handleDownload() {
+    const a = document.createElement("a");
+    a.href = url; a.download = fileName; a.target = "_blank"; a.rel = "noopener noreferrer";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-t-2xl px-5 pt-5 pb-8 flex flex-col gap-3 shadow-xl">
+        <div className="flex items-center gap-3 pb-1">
+          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label} File</span>
+            <span className="text-sm text-gray-900 truncate">{fileName}</span>
+          </div>
+        </div>
+        <button
+          onClick={handleDownload}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-medium transition-colors"
+        >
+          Download
+        </button>
+        <button onClick={onClose} className="w-full text-gray-500 text-sm py-1">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function ChatAttachment({ url, isMine }: { url: string; isMine: boolean }) {
+  const [lightboxOpen, setLightboxOpen]           = useState(false);
+  const [downloadSheetOpen, setDownloadSheetOpen] = useState(false);
+
+  if (isImageUrl(url)) {
+    return (
+      <>
+        <button type="button" onClick={() => setLightboxOpen(true)} className="block overflow-hidden rounded-xl focus:outline-none">
+          <img src={url} alt="attachment" className="max-w-[200px] max-h-[200px] w-full object-cover rounded-xl" />
+        </button>
+        {lightboxOpen && <ImageLightbox url={url} onClose={() => setLightboxOpen(false)} />}
+      </>
+    );
+  }
+
+  const label    = getFileTypeLabel(url);
+  const fileName = getChatFileName(url);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setDownloadSheetOpen(true)}
+        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-colors ${
+          isMine ? "bg-green-700/60 hover:bg-green-700/80" : "bg-gray-200 hover:bg-gray-300"
+        }`}
+      >
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isMine ? "bg-green-800/40" : "bg-white"}`}>
+          <svg className={`w-4 h-4 ${isMine ? "text-white" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+        </div>
+        <div className="flex flex-col min-w-0">
+          <span className={`text-[11px] font-semibold uppercase tracking-wide ${isMine ? "text-green-100" : "text-gray-500"}`}>{label}</span>
+          <span className={`text-xs truncate max-w-[130px] ${isMine ? "text-white" : "text-gray-800"}`}>{fileName}</span>
+        </div>
+      </button>
+      {downloadSheetOpen && <FileDownloadSheet url={url} onClose={() => setDownloadSheetOpen(false)} />}
+    </>
+  );
+}
+
 function ChatBubble({ entry, isMine }: { entry: CommentEntry; isMine: boolean }) {
   const timeStr = formatDateTime(entry.date);
 
@@ -892,20 +1090,32 @@ function ChatBubble({ entry, isMine }: { entry: CommentEntry; isMine: boolean })
     );
   }
 
+  const hasAttachments = entry.attachments && entry.attachments.length > 0;
+  const hasText        = !!entry.comment;
+
   return (
-    <div className={`flex flex-col gap-0.5 max-w-[80%] ${isMine ? "self-end items-end" : "self-start items-start"}`}>
+    <div className={`flex flex-col gap-1 max-w-[80%] ${isMine ? "self-end items-end" : "self-start items-start"}`}>
       {!isMine && (
         <span className="text-xs text-gray-400 px-1">{entry.name}</span>
       )}
-      <div
-        className={`px-3.5 py-2.5 rounded-2xl text-sm leading-snug ${
-          isMine
-            ? "bg-green-600 text-white rounded-br-sm"
-            : "bg-gray-100 text-gray-900 rounded-bl-sm"
-        }`}
-      >
-        {entry.comment}
-      </div>
+      {hasAttachments && (
+        <div className="flex flex-col gap-1.5">
+          {entry.attachments!.map((url, idx) => (
+            <ChatAttachment key={idx} url={url} isMine={isMine} />
+          ))}
+        </div>
+      )}
+      {hasText && (
+        <div
+          className={`px-3.5 py-2.5 rounded-2xl text-sm leading-snug ${
+            isMine
+              ? "bg-green-600 text-white rounded-br-sm"
+              : "bg-gray-100 text-gray-900 rounded-bl-sm"
+          }`}
+        >
+          {entry.comment}
+        </div>
+      )}
       {timeStr && (
         <span className="text-[10px] text-gray-400 px-1">{timeStr}</span>
       )}
@@ -926,35 +1136,119 @@ function ChatBox({
   requirementId: string;
   onNewComment: (entry: CommentEntry) => void;
 }) {
-  const [text, setText]       = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef             = useRef<HTMLDivElement>(null);
+  const [text, setText]                   = useState("");
+  const [sending, setSending]             = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadStatus, setUploadStatus]   = useState("");
+  const [fileError, setFileError]         = useState("");
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrls  = useRef<Map<File, string>>(new Map());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments]);
 
+  useEffect(() => {
+    const urls = previewUrls.current;
+    return () => { urls.forEach((u) => URL.revokeObjectURL(u)); };
+  }, []);
+
+  function getPreview(file: File): string {
+    if (!previewUrls.current.has(file)) {
+      previewUrls.current.set(file, URL.createObjectURL(file));
+    }
+    return previewUrls.current.get(file)!;
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const incoming = Array.from(e.target.files ?? []);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setFileError("");
+    const slots = CHAT_MAX_FILES - selectedFiles.length;
+    if (slots <= 0) { setFileError(`Max ${CHAT_MAX_FILES} attachments per message`); return; }
+    const toAdd: File[] = [];
+    for (const file of incoming.slice(0, slots)) {
+      if (!CHAT_ALLOWED_MIME.includes(file.type)) {
+        setFileError("Unsupported file type. Allowed: images, PDF, Excel, CSV");
+        continue;
+      }
+      if (file.size > CHAT_MAX_FILE_BYTES) {
+        setFileError(`"${file.name}" exceeds the 5 MB limit`);
+        continue;
+      }
+      toAdd.push(file);
+    }
+    if (toAdd.length) setSelectedFiles((prev) => [...prev, ...toAdd]);
+  }
+
+  function removeFile(idx: number) {
+    setSelectedFiles((prev) => {
+      const file = prev[idx];
+      if (previewUrls.current.has(file)) {
+        URL.revokeObjectURL(previewUrls.current.get(file)!);
+        previewUrls.current.delete(file);
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
+    setFileError("");
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!text.trim() || sending) return;
+    const hasText  = text.trim().length > 0;
+    const hasFiles = selectedFiles.length > 0;
+    if ((!hasText && !hasFiles) || sending) return;
     setSending(true);
+    setFileError("");
     try {
+      let attachmentUrls: string[] = [];
+      if (hasFiles) {
+        for (let i = 0; i < selectedFiles.length; i++) {
+          setUploadStatus(`Uploading ${i + 1} of ${selectedFiles.length}…`);
+          const raw  = selectedFiles[i];
+          const file = raw.type.startsWith("image/") ? await compressChatImage(raw) : raw;
+          const fd   = new FormData();
+          fd.append("file", file);
+          fd.append("userId", String(userId));
+          const res = await fetch("/api/upload/chat", { method: "POST", body: fd });
+          if (!res.ok) throw new Error("Upload failed");
+          const { url } = await res.json();
+          attachmentUrls.push(url);
+        }
+      }
+      setUploadStatus("Sending…");
+      const payload: Record<string, unknown> = { userId, name: userName, comment: text.trim() };
+      if (attachmentUrls.length) payload.attachments = attachmentUrls;
       const res = await fetch(`/api/requirements/${requirementId}/comment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, name: userName, comment: text.trim() }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Failed to send");
       const json = await res.json();
       onNewComment(json.data);
       setText("");
+      selectedFiles.forEach((f) => {
+        if (previewUrls.current.has(f)) {
+          URL.revokeObjectURL(previewUrls.current.get(f)!);
+          previewUrls.current.delete(f);
+        }
+      });
+      setSelectedFiles([]);
+    } catch {
+      setFileError("Failed to send. Please try again.");
     } finally {
       setSending(false);
+      setUploadStatus("");
     }
   }
 
+  const canSend = (text.trim().length > 0 || selectedFiles.length > 0) && !sending;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      {/* Messages */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-3">
         {comments.length === 0 ? (
           <p className="text-xs text-gray-400 text-center py-8">No comments yet. Start the conversation!</p>
@@ -966,10 +1260,74 @@ function ChatBox({
         <div ref={bottomRef} />
       </div>
 
+      {/* Pending attachment previews */}
+      {selectedFiles.length > 0 && (
+        <div className="border-t border-gray-100 px-3 pt-2.5 pb-1 flex gap-2 flex-wrap">
+          {selectedFiles.map((file, idx) => (
+            <div key={idx} className="relative">
+              {file.type.startsWith("image/") ? (
+                <img
+                  src={getPreview(file)}
+                  alt={file.name}
+                  className="w-16 h-16 object-cover rounded-xl border border-gray-200"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-xl border border-gray-200 bg-gray-50 flex flex-col items-center justify-center gap-0.5 px-1">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                  <span className="text-[9px] text-gray-500 text-center leading-tight">
+                    {file.name.split(".").pop()?.toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => removeFile(idx)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-700 text-white flex items-center justify-center shadow"
+                aria-label="Remove"
+              >
+                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Upload status / error */}
+      {(uploadStatus || fileError) && (
+        <div className="px-3 py-1">
+          {uploadStatus && <p className="text-xs text-gray-400">{uploadStatus}</p>}
+          {fileError    && <p className="text-xs text-red-500">{fileError}</p>}
+        </div>
+      )}
+
+      {/* Input toolbar */}
       <form
         onSubmit={submit}
-        className="border-t border-gray-100 px-3 py-2.5 flex items-end gap-2 shrink-0"
+        className="border-t border-gray-100 px-3 py-2.5 flex items-center gap-2 shrink-0"
       >
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={sending || selectedFiles.length >= CHAT_MAX_FILES}
+          className="shrink-0 text-gray-400 hover:text-gray-600 disabled:text-gray-200 transition-colors"
+          aria-label="Attach file"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+          </svg>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+          className="hidden"
+          onChange={handleFileChange}
+        />
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -983,13 +1341,20 @@ function ChatBox({
         />
         <button
           type="submit"
-          disabled={!text.trim() || sending}
+          disabled={!canSend}
           className="shrink-0 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded-xl px-3.5 py-2 transition-colors"
           aria-label="Send"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-          </svg>
+          {sending ? (
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            </svg>
+          )}
         </button>
       </form>
     </div>

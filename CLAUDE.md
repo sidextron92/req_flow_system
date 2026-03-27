@@ -41,6 +41,7 @@ npm run lint   # ESLint
 | `app/components/PushPermissionPrompt.tsx` | First-visit banner (2s delay) prompting user to enable push notifications |
 | `app/settings/page.tsx` | Settings page at `/settings?userId=<id>` — shows subscription status, device info, resubscribe |
 | `worker/index.js` | Service worker push handler + notificationclick deep-link opener — compiled by next-pwa and injected via `importScripts` into `sw.js` |
+| `app/api/upload/chat/route.ts` | Multipart file upload endpoint → `reqflow_attachments` Supabase bucket; validates type + 5 MB; returns public URL |
 
 ## API routes
 | Route | Method | What it does |
@@ -52,7 +53,8 @@ npm run lint   # ESLint
 | `/api/requirements/[id]` | PATCH | Save final extraction → status OPEN |
 | `/api/requirements/[id]/status` | PATCH | Role-gated status transition; validates role + transition, writes audit log |
 | `/api/requirements/[id]/assign` | PATCH | Reassign to a different bijnisBuyer; only current assignee (role=bijnisBuyer) can call; status must be OPEN or IN_PROCESS; ASSIGNMENT_CHANGE written via DB trigger; assigned_date unchanged |
-| `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array |
+| `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array; accepts optional `attachments: string[]` of Supabase public URLs; comment text is optional if attachments are present |
+| `/api/upload/chat` | POST | Upload a single file (multipart) to `reqflow_attachments` bucket; validates type + 5 MB limit; returns `{ url }` |
 | `/api/user` | GET | User info from users table |
 | `/api/users/bijnisBuyers` | GET | All users with role='bijnisBuyer' (id, name, phone); used by reassign bottom sheet |
 | `/api/transcribe` | POST | Deepgram: audio → Hindi transcript |
@@ -75,6 +77,19 @@ npm run lint   # ESLint
 - Triggers: `set_updated_at()` stamps `updated_at` BEFORE UPDATE; `log_requirement_changes()` writes to `status_update_log` AFTER UPDATE when `status` or `assigned_to_user_id` changes — reads `updated_by` as `changed_by` (NULL if not set)
 - RPCs: `fuzzy_search_brands(query, limit)`, `fuzzy_search_products(query, limit)`
 
+### comment_log entry shape
+Each entry in `comment_log` is a JSONB object:
+```json
+{
+  "userId": 123,
+  "name": "Ravi Sharma",
+  "comment": "text or empty string",
+  "date": "2026-03-27T10:00:00.000Z",
+  "attachments": ["https://...supabase.co/storage/v1/object/public/reqflow_attachments/123/1234567890-file.pdf"]
+}
+```
+`attachments` is optional — omitted when there are no files. `comment` may be an empty string when only attachments are sent.
+
 ## Required env vars (.env.local)
 ```
 NEXT_PUBLIC_SUPABASE_URL=
@@ -88,6 +103,42 @@ NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:admin@reqflow.com
 ```
+
+## Chat Attachment System
+
+Users can attach up to **3 files per message** in the chat window. Supported types: images (JPEG, PNG, WEBP, GIF), PDF, Excel (.xlsx/.xls), CSV. Max file size: **5 MB per file**.
+
+### Storage
+- Bucket: `reqflow_attachments` (must be created in Supabase and set to **public**)
+- Storage path: `{userId}/{timestamp}-{sanitizedOriginalFilename}`
+- The original filename is preserved (sanitized) in the path so it can be extracted for display without storing extra metadata
+
+### Upload flow
+1. User taps the paperclip icon → OS file/gallery picker opens
+2. Files are validated client-side (type + size + count)
+3. On send: images are compressed first (`compressChatImage` — max 800px, 400 KB, 65% JPEG quality)
+4. Each file is POSTed individually to `/api/upload/chat` (server validates again, uploads via `supabaseAdmin`)
+5. Collected URLs are included in the `POST /api/requirements/[id]/comment` payload as `attachments: string[]`
+
+### Chat UI rendering
+| Attachment type | In-chat display | On tap |
+|----------------|----------------|--------|
+| Image (jpg/png/webp/gif) | Thumbnail (max 200×200) | Fullscreen lightbox with pinch-to-zoom (1×–4×) |
+| PDF / Excel / CSV | File icon + filename | Bottom sheet with Download / Cancel |
+| Other | File icon + filename | Bottom sheet with Download / Cancel |
+
+Key components (all in `app/requirements/[id]/page.tsx`):
+- `compressChatImage` — client-side image compression before upload
+- `ImageLightbox` — fullscreen overlay; pinch-to-zoom via touch distance tracking; Escape key closes
+- `FileDownloadSheet` — bottom sheet modal; triggers `<a download>` on confirm
+- `ChatAttachment` — renders one attachment (image thumbnail or file pill)
+- `getChatFileName(url)` — strips timestamp prefix from storage path to recover display filename
+- `getFileTypeLabel(url)` — returns "PDF" / "EXCEL" / "CSV" / "FILE" from URL extension
+
+### Key constraints
+- Attachment-only messages are allowed (empty `comment` string is valid if `attachments` is non-empty)
+- Push notification body falls back to `"X sent N attachment(s)"` for attachment-only messages
+- The attach button is disabled while sending or when 3 files are already selected
 
 ## Push Notification System
 
