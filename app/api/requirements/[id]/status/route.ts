@@ -15,11 +15,15 @@ type AllowedTransition = Record<string, string[]>;
 
 const CREATOR_TRANSITIONS: AllowedTransition = {
   REVIEW_FOR_COMPLETION: ["COMPLETED", "PARTIALLY_COMPLETE", "INCOMPLETE"],
+  COMPLETED:             ["PARTIALLY_COMPLETE", "INCOMPLETE"],
+  PARTIALLY_COMPLETE:    ["COMPLETED", "INCOMPLETE"],
+  INCOMPLETE:            ["COMPLETED", "PARTIALLY_COMPLETE"],
 };
 
 const ASSIGNEE_TRANSITIONS: AllowedTransition = {
-  OPEN:       ["IN_PROCESS", "CANNOT_BE_DONE"],
-  IN_PROCESS: ["REVIEW_FOR_COMPLETION", "CANNOT_BE_DONE"],
+  OPEN:           ["IN_PROCESS", "CANNOT_BE_DONE"],
+  IN_PROCESS:     ["REVIEW_FOR_COMPLETION", "CANNOT_BE_DONE"],
+  CANNOT_BE_DONE: ["IN_PROCESS"],
 };
 
 export async function PATCH(
@@ -110,6 +114,9 @@ export async function PATCH(
         COMPLETED:             { title: "Completed", body: `${label} has been marked as Completed` },
         PARTIALLY_COMPLETE:    { title: "Partially complete", body: `${label} has been marked as Partially Complete` },
         INCOMPLETE:            { title: "Needs rework", body: `${label} was marked as Incomplete` },
+        // Rollback cases
+        // CANNOT_BE_DONE → IN_PROCESS (assignee rollback): reuses IN_PROCESS message above
+        // Terminal state change by creator: reuses COMPLETED / PARTIALLY_COMPLETE / INCOMPLETE messages above
       };
 
       const msg = messages[newStatus];
