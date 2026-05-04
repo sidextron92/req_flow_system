@@ -82,9 +82,11 @@ const BY_ME_FILTERS: FilterDef[] = [
 ];
 
 const FOR_ME_FILTERS: FilterDef[] = [
-  { key: "all_open",  label: "All Open" },
-  { key: "follow_up", label: "Follow Up" },
-  { key: "closed",    label: "Closed" },
+  { key: "all_open",       label: "All Open" },
+  { key: "follow_up",      label: "Follow Up" },
+  { key: "cannot_be_done", label: "Cannot Be Done" },
+  { key: "incomplete",     label: "Incomplete" },
+  { key: "closed",         label: "Closed" },
 ];
 
 const BY_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
@@ -93,9 +95,11 @@ const BY_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
 };
 
 const FOR_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
-  all_open:  new Set(["OPEN", "IN_PROCESS"]),
-  follow_up: new Set(["REVIEW_FOR_COMPLETION"]),
-  closed:    new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]),
+  all_open:       new Set(["OPEN", "IN_PROCESS"]),
+  follow_up:      new Set(["REVIEW_FOR_COMPLETION"]),
+  cannot_be_done: new Set(["CANNOT_BE_DONE"]),
+  incomplete:     new Set(["INCOMPLETE", "PARTIALLY_COMPLETE"]),
+  closed:         new Set(["COMPLETED"]),
 };
 
 type SortOption = "deadline_asc" | "created_desc";
