@@ -64,7 +64,7 @@ const TYPE_COLORS: Record<string, string> = {
   NEW_VARIETY: "text-violet-600",
 };
 
-const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED"]);
+const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]);
 
 // ─── Filter definitions ────────────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ const FOR_ME_FILTERS: FilterDef[] = [
 ];
 
 const BY_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
-  all_open: new Set(["DRAFT", "OPEN", "IN_PROCESS", "REVIEW_FOR_COMPLETION"]),
+  all_open: new Set(["OPEN", "IN_PROCESS", "REVIEW_FOR_COMPLETION"]),
   closed:   new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]),
 };
 

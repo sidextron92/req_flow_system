@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
       requirement_products ( id, product_id, product_name, notes )
     `)
     .eq("created_by", userId)
+    .neq("status", "DRAFT")
     .order("created_at", { ascending: false });
 
   if (error) {
