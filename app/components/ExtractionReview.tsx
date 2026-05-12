@@ -78,6 +78,8 @@ export default function ExtractionReview({
   const [selectedProducts, setSelectedProducts] = useState<Record<string, { name: string; id: string; brand_id: string | null; brand_name: string | null; bijnis_buyer_id: string | null }>>({});
   const [isFuzzyChecking, setIsFuzzyChecking] = useState(false);
   const [fuzzyError, setFuzzyError]           = useState<string | null>(null);
+  const [prefetchResult, setPrefetchResult]   = useState<{ checked: boolean; needsInput: boolean } | null>(null);
+  const prefetchInFlight                      = useRef(false);
   // Editable "as typed" text for brand and products
   const [editingLabel, setEditingLabel]               = useState(false);
   const [editedLabelText, setEditedLabelText]         = useState("");
@@ -91,6 +93,64 @@ export default function ExtractionReview({
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  // Eager fuzzy-match prefetch so the summary CTA is honest
+  useEffect(() => {
+    if (!extraction || view !== "extraction") return;
+    if (prefetchInFlight.current) return;
+
+    setPrefetchResult(null);
+
+    async function doPrefetch() {
+      prefetchInFlight.current = true;
+      const label_name =
+        typeof extraction!.label_name === "string" && extraction!.label_name.trim()
+          ? extraction!.label_name.trim()
+          : undefined;
+      const product_names: string[] = Array.isArray(extraction!.products)
+        ? (extraction!.products as Record<string, unknown>[])
+            .map((p) => String(p.product_name ?? "").trim())
+            .filter(Boolean)
+        : [];
+
+      if (!label_name && product_names.length === 0) {
+        setPrefetchResult({ checked: true, needsInput: false });
+        prefetchInFlight.current = false;
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/brand-product/fuzzy-search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label_name, product_names }),
+        });
+        const json = await res.json();
+
+        if (!res.ok) {
+          setPrefetchResult({ checked: true, needsInput: false });
+          return;
+        }
+
+        const labelNeedsInput =
+          json.label && !json.label.exact && json.label.suggestions.length > 0;
+        const productsNeedInput = (json.products as ProductResult[]).some(
+          (p: ProductResult) => !p.exact && p.suggestions.length > 0
+        );
+
+        setPrefetchResult({
+          checked: true,
+          needsInput: labelNeedsInput || productsNeedInput,
+        });
+      } catch {
+        setPrefetchResult({ checked: true, needsInput: false });
+      } finally {
+        prefetchInFlight.current = false;
+      }
+    }
+
+    doPrefetch();
+  }, [extraction, view]);
 
   // ── Save to DB ─────────────────────────────────────────────
   async function saveRequirement(
@@ -688,18 +748,24 @@ export default function ExtractionReview({
           );
         })()}
 
-        {data.extraction_notes != null && (() => {
-          const note = String(data.extraction_notes);
-          return (
-            <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
-              <p className="text-xs font-semibold text-amber-700 mb-0.5">Model Notes</p>
-              <p className="text-xs text-amber-800">{note}</p>
-            </div>
-          );
-        })()}
       </div>
     );
   }
+
+  // Determine honest CTA label before user taps it
+  const needsCategoryCheck =
+    extraction && !categoryCheckDone
+      ? (() => {
+          const conf = extraction.confidence as Record<string, number> | null | undefined;
+          const categoryConfidence = conf?.category_name ?? (extraction.category_name ? 1 : 0);
+          return categoryConfidence < 0.9 || !extraction.category_name;
+        })()
+      : false;
+
+  const validation = extraction ? validateExtraction(extraction, requirementType) : { valid: true, missingFields: [], missingKeys: [] };
+  const needsValidationChat = !validation.valid;
+  const needsFuzzyInput = prefetchResult?.needsInput ?? false;
+  const willNeedUserInput = needsCategoryCheck || needsValidationChat || needsFuzzyInput;
 
   // ── Render ─────────────────────────────────────────────────
   return (
@@ -1036,9 +1102,7 @@ export default function ExtractionReview({
           <>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
               <div>
-                <h2 className="text-base font-semibold text-gray-900">
-                  {!categoryCheckDone ? "Confirm Category" : "Missing Details"}
-                </h2>
+                <h2 className="text-base font-semibold text-gray-900">Confirm Details</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Reply in any language</p>
               </div>
               <button
@@ -1144,7 +1208,7 @@ export default function ExtractionReview({
           <>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
               <div>
-                <h2 className="text-base font-semibold text-gray-900">AI Extraction</h2>
+                <h2 className="text-base font-semibold text-gray-900">Requirement Summary</h2>
                 {currentModel && (
                   <p className="text-xs text-gray-400 mt-0.5">Model: {currentModel}</p>
                 )}
@@ -1178,14 +1242,34 @@ export default function ExtractionReview({
               )}
             </div>
 
-            <div className="flex gap-2 px-4 py-4 border-t border-gray-100 flex-shrink-0">
+            <div className="flex flex-col gap-0 px-4 py-4 border-t border-gray-100 flex-shrink-0">
               <button
                 type="button"
                 onClick={handleDone}
-                disabled={!extraction || isSaving || isFuzzyChecking}
-                className="flex-1 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
+                disabled={!extraction || isSaving || isFuzzyChecking || !prefetchResult}
+                className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-2xl transition-colors disabled:opacity-50 flex items-center px-4 py-3"
               >
-                {isFuzzyChecking ? "Checking..." : isSaving ? "Saving..." : "Done"}
+                {willNeedUserInput ? (
+                  <>
+                    <span className="flex flex-col flex-1 text-left">
+                      <span className="text-sm font-semibold leading-tight">Continue</span>
+                      <span className="text-xs text-white/80 font-normal leading-tight mt-0.5">Fill missing details</span>
+                    </span>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-white flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </>
+                ) : (
+                  <span className="flex-1 text-center text-sm font-semibold">
+                    {!prefetchResult
+                      ? "Checking..."
+                      : isFuzzyChecking
+                      ? "Checking..."
+                      : isSaving
+                      ? "Saving..."
+                      : "Create Requirement"}
+                  </span>
+                )}
               </button>
             </div>
           </>

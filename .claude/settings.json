@@ -9,7 +9,22 @@
       "Bash(git add app/requirements/[id]/page.tsx app/api/brand-product/fuzzy-search/route.ts app/api/requirements/[id]/route.ts app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js)",
       "Bash(git add 'app/requirements/[id]/page.tsx' 'app/api/brand-product/fuzzy-search/route.ts' 'app/api/requirements/[id]/route.ts' app/components/ExtractionReview.tsx app/layout.tsx next.config.ts package-lock.json package.json supabase/schema.sql .gitignore CLAUDE.md .mcp.json public/icon-192.png public/icon-512.png public/manifest.json public/swe-worker-5c72df51bb1f6ee0.js .claude/)",
       "Bash(git add CLAUDE.md app/api/requirements/route.ts \"app/api/requirements/[id]/route.ts\" app/components/ExtractionReview.tsx app/components/RequirementForm.tsx supabase/schema.sql)",
-      "Bash(git add app/page.tsx \"app/requirements/[id]/page.tsx\")"
+      "Bash(git add app/page.tsx \"app/requirements/[id]/page.tsx\")",
+      "Bash(git add app/api/requirements/[id]/assign/route.ts app/api/requirements/[id]/route.ts app/api/requirements/[id]/status/route.ts)",
+      "Bash(git add app/page.tsx app/requirements/[id]/page.tsx app/settings/page.tsx)",
+      "Bash(git add app/components/PushPermissionPrompt.tsx app/layout.tsx)",
+      "Bash(git add worker/index.js public/push-badge.png)",
+      "Bash(git diff CLAUDE.md app/api/requirements/[id]/route.ts)",
+      "Bash(git add CLAUDE.md \"app/api/requirements/[id]/route.ts\")",
+      "Bash(git add app/page.tsx)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:serwist.pages.dev)",
+      "WebFetch(domain:ducanh-next-pwa.vercel.app)",
+      "Bash(git add app/page.tsx app/requirements/[id]/page.tsx)",
+      "Bash(lsof -ti :3000)",
+      "Bash(git add app/api/user/route.ts app/requirements/[id]/page.tsx)",
+      "Bash(grep -n \"CommentEntry\\\\|comment_log\\\\|handleAddComment\\\\|commentText\\\\|setCommentText\\\\|commentSection\\\\|comments\\\\|newComment\" /Users/bijnis/Documents/Projects/reqFlow_exp/app/requirements/[id]/page.tsx)",
+      "Bash(git add \"app/api/requirements/[id]/comment/route.ts\")"
     ]
   }
 }

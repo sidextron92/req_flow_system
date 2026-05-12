@@ -610,6 +610,13 @@ export default function RequirementForm({
               disabled={isSubmitting}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none disabled:opacity-60"
             />
+            <p className="text-xs text-gray-500">
+              {type === "Restock"
+                ? "Mention product codes (e.g. ASIAN 010) and delivery deadline"
+                : type === "New Label" || type === "New Variety"
+                ? "Mention brand name, quantity needed, and delivery deadline"
+                : "Make sure to mention Quantity and Deadline information"}
+            </p>
           </div>
 
           {/* Error */}
