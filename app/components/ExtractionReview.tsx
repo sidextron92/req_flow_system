@@ -80,10 +80,8 @@ export default function ExtractionReview({
   const [fuzzyError, setFuzzyError]           = useState<string | null>(null);
   const [prefetchResult, setPrefetchResult]   = useState<{ checked: boolean; needsInput: boolean } | null>(null);
   const prefetchInFlight                      = useRef(false);
-  // Editable "as typed" text for brand and products
-  const [editingLabel, setEditingLabel]               = useState(false);
+  // Input field values for brand and products in fuzzy match
   const [editedLabelText, setEditedLabelText]         = useState("");
-  const [editingProducts, setEditingProducts]         = useState<Record<string, boolean>>({});
   const [editedProductTexts, setEditedProductTexts]   = useState<Record<string, string>>({});
   // Extraction snapshot to save after fuzzy confirm
   const pendingExtractionRef = useRef<Record<string, unknown> | null>(null);
@@ -323,6 +321,8 @@ export default function ExtractionReview({
       for (const p of (json.products as ProductResult[])) {
         if (p.exact) {
           preProducts[p.original] = { name: p.exact.product_name, id: p.exact.product_id, brand_id: p.exact.brand_id, brand_name: p.exact.brand_name, bijnis_buyer_id: p.exact.bijnis_buyer_id ?? null };
+        } else {
+          preProducts[p.original] = { name: p.original, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null };
         }
       }
 
@@ -333,12 +333,17 @@ export default function ExtractionReview({
         labelSuggestions: json.label?.suggestions ?? [],
         products: json.products,
       });
-      setSelectedLabel(preLabel);
+      // Default to "as typed" if no exact match pre-selected
+      setSelectedLabel(
+        preLabel ?? { name: label_name ?? "", id: "", supply_tl_id: null }
+      );
       setSelectedProducts(preProducts);
-      setEditingLabel(false);
-      setEditedLabelText("");
-      setEditingProducts({});
-      setEditedProductTexts({});
+      setEditedLabelText(label_name ?? "");
+      const initialProductTexts: Record<string, string> = {};
+      for (const p of (json.products as ProductResult[])) {
+        initialProductTexts[p.original] = p.original;
+      }
+      setEditedProductTexts(initialProductTexts);
       setIsFuzzyChecking(false);
       setView("fuzzy-match");
     } catch {
@@ -365,18 +370,6 @@ export default function ExtractionReview({
     setExtraction(merged);
     const buyerId = Object.values(selectedProducts).find((s) => s.bijnis_buyer_id)?.bijnis_buyer_id ?? null;
     const ok = await saveRequirement(merged, buyerId, selectedLabel?.supply_tl_id ?? null);
-    if (ok) { setView("success"); onSaved(); }
-  }
-
-  async function handleFuzzySkip() {
-    if (!pendingExtractionRef.current) return;
-    // Apply the pre-resolved label exact match even when user skips product selection.
-    // "Save as typed" means products are not catalog-resolved, but an exact label match
-    // was already silently found and should not be discarded.
-    const baseExtraction = selectedLabel?.id
-      ? { ...pendingExtractionRef.current, label_id: selectedLabel.id, label_name: selectedLabel.name }
-      : pendingExtractionRef.current;
-    const ok = await saveRequirement(baseExtraction, null, selectedLabel?.supply_tl_id ?? null);
     if (ok) { setView("success"); onSaved(); }
   }
 
@@ -823,7 +816,7 @@ export default function ExtractionReview({
               </div>
             </div>
 
-            <div className="flex flex-col gap-5 px-4 py-4 overflow-y-auto flex-1">
+            <div className="flex flex-col gap-6 px-4 py-4 overflow-y-auto flex-1">
 
               {/* Label / Brand section */}
               {fuzzyState.labelQuery && fuzzyState.labelSuggestions.length > 0 && (
@@ -831,102 +824,74 @@ export default function ExtractionReview({
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     Brand Name
                   </p>
-                  <p className="text-xs text-gray-500">
-                    You entered: <span className="font-medium text-gray-700">{fuzzyState.labelQuery}</span>
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {fuzzyState.labelSuggestions.map((s) => {
-                      const isSelected = selectedLabel?.name === s.brand_name && selectedLabel?.id === s.brand_id;
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-400">You entered</label>
+                    <input
+                      type="text"
+                      value={editedLabelText}
+                      readOnly={selectedLabel?.id !== ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditedLabelText(val);
+                        setSelectedLabel({ name: val, id: "", supply_tl_id: null });
+                      }}
+                      className={`w-full border rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none ${
+                        selectedLabel?.id !== ""
+                          ? "bg-gray-100 border-gray-200 cursor-not-allowed"
+                          : "bg-white border-gray-300 focus:ring-2 focus:ring-green-500"
+                      }`}
+                    />
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {/* As typed pill */}
+                    {(() => {
+                      const isTypedSelected = selectedLabel?.id === "";
                       return (
                         <button
-                          key={`${s.brand_name}::${s.brand_id}`}
-                          onClick={() =>
-                            setSelectedLabel(
-                              isSelected ? null : { name: s.brand_name, id: s.brand_id, supply_tl_id: s.supply_tl_id ?? null }
-                            )
-                          }
-                          className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                            isSelected
-                              ? "bg-green-600 border-green-600 text-white"
+                          onClick={() => {
+                            const originalText = fuzzyState.labelQuery ?? "";
+                            setEditedLabelText(originalText);
+                            setSelectedLabel({ name: originalText, id: "", supply_tl_id: null });
+                          }}
+                          className={`flex-shrink-0 text-sm px-3 py-1.5 rounded-full border font-medium transition-colors flex items-center gap-1 ${
+                            isTypedSelected
+                              ? "bg-green-100 border-green-300 text-green-900"
                               : "bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
                           }`}
                         >
+                          {isTypedSelected && (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                          As typed
+                        </button>
+                      );
+                    })()}
+                    {fuzzyState.labelSuggestions.map((s) => {
+                      const isSelected = selectedLabel?.id === s.brand_id;
+                      return (
+                        <button
+                          key={`${s.brand_name}::${s.brand_id}`}
+                          onClick={() => {
+                            setEditedLabelText(s.brand_name);
+                            setSelectedLabel({ name: s.brand_name, id: s.brand_id, supply_tl_id: s.supply_tl_id ?? null });
+                          }}
+                          className={`flex-shrink-0 text-sm px-3 py-1.5 rounded-full border font-medium transition-colors flex items-center gap-1 ${
+                            isSelected
+                              ? "bg-green-100 border-green-300 text-green-900"
+                              : "bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
+                          }`}
+                        >
+                          {isSelected && (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
                           {s.brand_name}
                         </button>
                       );
                     })}
-                    {/* User's original input – editable pill */}
-                    {(() => {
-                      const displayText = editedLabelText || fuzzyState.labelQuery!;
-                      const isSelected =
-                        selectedLabel?.name === displayText &&
-                        selectedLabel?.id === "";
-
-                      if (editingLabel) {
-                        return (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              autoFocus
-                              value={editedLabelText || fuzzyState.labelQuery!}
-                              onChange={(e) => setEditedLabelText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  const val = (editedLabelText || fuzzyState.labelQuery!).trim();
-                                  if (val) {
-                                    setSelectedLabel({ name: val, id: "", supply_tl_id: null });
-                                    setEditingLabel(false);
-                                  }
-                                }
-                              }}
-                              className="text-sm px-3 py-1.5 rounded-full border border-gray-400 bg-white text-gray-900 font-medium outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-400 w-48"
-                            />
-                            <button
-                              onClick={() => {
-                                const val = (editedLabelText || fuzzyState.labelQuery!).trim();
-                                if (val) {
-                                  setSelectedLabel({ name: val, id: "", supply_tl_id: null });
-                                  setEditingLabel(false);
-                                }
-                              }}
-                              className="text-xs px-2 py-1 rounded-full bg-gray-700 text-white font-medium"
-                            >
-                              Done
-                            </button>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              setSelectedLabel(
-                                isSelected ? null : { name: displayText, id: "", supply_tl_id: null }
-                              )
-                            }
-                            className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                              isSelected
-                                ? "bg-gray-700 border-gray-700 text-white"
-                                : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
-                            }`}
-                          >
-                            {displayText} (as typed)
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (!editedLabelText) setEditedLabelText(fuzzyState.labelQuery!);
-                              setEditingLabel(true);
-                            }}
-                            className="text-gray-400 hover:text-gray-600 p-1"
-                            title="Edit"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                              <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
-                            </svg>
-                          </button>
-                        </div>
-                      );
-                    })()}
                   </div>
                 </div>
               )}
@@ -934,131 +899,89 @@ export default function ExtractionReview({
               {/* Products sections */}
               {fuzzyState.products
                 .filter((p) => !p.exact && p.suggestions.length > 0)
-                .map((p) => {
+                .map((p, idx) => {
                   const sel = selectedProducts[p.original];
                   return (
                     <div key={p.original} className="flex flex-col gap-2">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                        Product
+                        Product #{idx + 1}
                       </p>
-                      <p className="text-xs text-gray-500">
-                        You entered: <span className="font-medium text-gray-700">{p.original}</span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs text-gray-400">You entered</label>
+                        <input
+                          type="text"
+                          value={editedProductTexts[p.original] ?? p.original}
+                          readOnly={sel?.id !== ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditedProductTexts((prev) => ({ ...prev, [p.original]: val }));
+                            setSelectedProducts((prev) => ({
+                              ...prev,
+                              [p.original]: { name: val, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null },
+                            }));
+                          }}
+                          className={`w-full border rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none ${
+                            sel?.id !== ""
+                              ? "bg-gray-100 border-gray-200 cursor-not-allowed"
+                              : "bg-white border-gray-300 focus:ring-2 focus:ring-green-500"
+                          }`}
+                        />
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                        {/* As typed pill */}
+                        {(() => {
+                          const isTypedSelected = sel?.id === "";
+                          return (
+                            <button
+                              onClick={() => {
+                                setEditedProductTexts((prev) => ({ ...prev, [p.original]: p.original }));
+                                setSelectedProducts((prev) => ({
+                                  ...prev,
+                                  [p.original]: { name: p.original, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null },
+                                }));
+                              }}
+                              className={`flex-shrink-0 text-sm px-3 py-1.5 rounded-full border font-medium transition-colors flex items-center gap-1 ${
+                                isTypedSelected
+                                  ? "bg-green-100 border-green-300 text-green-900"
+                                  : "bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
+                              }`}
+                            >
+                              {isTypedSelected && (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                              As typed
+                            </button>
+                          );
+                        })()}
                         {p.suggestions.map((s) => {
-                          const isSelected =
-                            sel?.name === s.product_name && sel?.id === s.product_id;
+                          const isSelected = sel?.id === s.product_id;
                           return (
                             <button
                               key={`${s.product_name}::${s.product_id}`}
                               onClick={() => {
-                                setSelectedProducts((prev) => {
-                                  if (isSelected) {
-                                    const next = { ...prev };
-                                    delete next[p.original];
-                                    return next;
-                                  }
-                                  return { ...prev, [p.original]: { name: s.product_name, id: s.product_id, brand_id: s.brand_id, brand_name: s.brand_name, bijnis_buyer_id: s.bijnis_buyer_id ?? null } };
-                                });
+                                setEditedProductTexts((prev) => ({ ...prev, [p.original]: s.product_name }));
+                                setSelectedProducts((prev) => ({
+                                  ...prev,
+                                  [p.original]: { name: s.product_name, id: s.product_id, brand_id: s.brand_id, brand_name: s.brand_name, bijnis_buyer_id: s.bijnis_buyer_id ?? null },
+                                }));
                               }}
-                              className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                              className={`flex-shrink-0 text-sm px-3 py-1.5 rounded-full border font-medium transition-colors flex items-center gap-1 ${
                                 isSelected
-                                  ? "bg-green-600 border-green-600 text-white"
+                                  ? "bg-green-100 border-green-300 text-green-900"
                                   : "bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
                               }`}
                             >
+                              {isSelected && (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
                               {s.product_name}
                             </button>
                           );
                         })}
-                        {/* User's original input – editable pill */}
-                        {(() => {
-                          const displayText = editedProductTexts[p.original] || p.original;
-                          const isSelected = sel?.name === displayText && sel?.id === "";
-                          const isEditing = editingProducts[p.original];
-
-                          if (isEditing) {
-                            return (
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  autoFocus
-                                  value={editedProductTexts[p.original] || p.original}
-                                  onChange={(e) =>
-                                    setEditedProductTexts((prev) => ({
-                                      ...prev,
-                                      [p.original]: e.target.value,
-                                    }))
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      const val = (editedProductTexts[p.original] || p.original).trim();
-                                      if (val) {
-                                        setSelectedProducts((prev) => ({
-                                          ...prev,
-                                          [p.original]: { name: val, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null },
-                                        }));
-                                        setEditingProducts((prev) => ({ ...prev, [p.original]: false }));
-                                      }
-                                    }
-                                  }}
-                                  className="text-sm px-3 py-1.5 rounded-full border border-gray-400 bg-white text-gray-900 font-medium outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-400 w-48"
-                                />
-                                <button
-                                  onClick={() => {
-                                    const val = (editedProductTexts[p.original] || p.original).trim();
-                                    if (val) {
-                                      setSelectedProducts((prev) => ({
-                                        ...prev,
-                                        [p.original]: { name: val, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null },
-                                      }));
-                                      setEditingProducts((prev) => ({ ...prev, [p.original]: false }));
-                                    }
-                                  }}
-                                  className="text-xs px-2 py-1 rounded-full bg-gray-700 text-white font-medium"
-                                >
-                                  Done
-                                </button>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => {
-                                  setSelectedProducts((prev) => {
-                                    if (isSelected) {
-                                      const next = { ...prev };
-                                      delete next[p.original];
-                                      return next;
-                                    }
-                                    return { ...prev, [p.original]: { name: displayText, id: "", brand_id: null, brand_name: null, bijnis_buyer_id: null } };
-                                  });
-                                }}
-                                className={`text-sm px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                                  isSelected
-                                    ? "bg-gray-700 border-gray-700 text-white"
-                                    : "bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200"
-                                }`}
-                              >
-                                {displayText} (as typed)
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (!editedProductTexts[p.original])
-                                    setEditedProductTexts((prev) => ({ ...prev, [p.original]: p.original }));
-                                  setEditingProducts((prev) => ({ ...prev, [p.original]: true }));
-                                }}
-                                className="text-gray-400 hover:text-gray-600 p-1"
-                                title="Edit"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                  <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
-                                </svg>
-                              </button>
-                            </div>
-                          );
-                        })()}
                       </div>
                     </div>
                   );
@@ -1076,20 +999,12 @@ export default function ExtractionReview({
               )}
             </div>
 
-            <div className="flex gap-2 px-4 py-4 border-t border-gray-100 flex-shrink-0">
-              <button
-                type="button"
-                onClick={handleFuzzySkip}
-                disabled={isSaving}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
-              >
-                Save as typed
-              </button>
+            <div className="px-4 py-4 border-t border-gray-100 flex-shrink-0">
               <button
                 type="button"
                 onClick={handleFuzzyConfirm}
                 disabled={isSaving}
-                className="flex-1 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
+                className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-sm py-3 rounded-2xl transition-colors disabled:opacity-50"
               >
                 {isSaving ? "Saving..." : "Confirm & Save"}
               </button>

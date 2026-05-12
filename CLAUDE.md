@@ -180,7 +180,7 @@ All notifications are fire-and-forget (IIFE async) — failures never affect the
 - Mobile-first, `max-w-md` centered layout
 - `rounded-2xl` cards, `bg-blue-600` primary CTA
 - Bottom-sheet modals with slide-up animation
-- Pill buttons for fuzzy match selection (blue = catalog suggestion, gray = as-typed)
+- Pill buttons for fuzzy match selection (green = all options; selected has tick icon)
 
 ## Architecture notes
 - AI extraction returns a JSON blob; `ExtractionReview` drives a state machine: `extraction → [category-correction chat] → [missing-fields chat] → fuzzy-match → success`. The category step is skipped if `confidence.category_name ≥ 0.9` and `category_name` is non-null.
@@ -217,7 +217,7 @@ This section documents every step end-to-end. Reference a step number when descr
   - **RESTOCK** — extracts `label_name`, `category_name`, `expiry_date`, `remarks`, `products[]` (each product must have format `"BrandName NumericCode"`, e.g. `"ASIAN 010"`).
   - **NEW_LABEL** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `remarks`, `products[]` (max 1 representative product).
   - **NEW_VARIETY** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `remarks`, `products[]` (multiple variants allowed).
-2.3 AI also returns `confidence{}` (per-field 0–1 score) and `extraction_notes` — shown in the review UI but not saved to the requirements row.
+2.3 AI also returns `confidence{}` (per-field 0–1 score) and `extraction_notes` — `confidence` is used for the category check threshold; `extraction_notes` is hidden from the UI.
 2.4 AI must **never** output `label_id` or `product_id` — those are catalog IDs resolved only via fuzzy match (Step 4).
 2.5 The user can edit the system prompt in the UI and click **Re-run** to re-extract with the same images/notes.
 
@@ -227,7 +227,7 @@ This section documents every step end-to-end. Reference a step number when descr
 
 #### 3.0 Category confidence check (runs first, before validation)
 When the user clicks **Done**, `ExtractionReview` first checks `confidence.category_name`:
-- If `confidence.category_name < 0.7` **or** `category_name` is null → open chat view in "Confirm Category" mode:
+- If `confidence.category_name < 0.9` **or** `category_name` is null → open chat view in "Confirm Details" mode (category sub-step):
   1. POSTs to `/api/ai/fill-missing` with `requestType: "category_suggestions"` — AI returns top-5 ranked categories from `CATEGORY_LIST` ordered by likelihood.
   2. Chat shows the AI's opening message (with current category + confidence %, or "couldn't determine") and renders the suggestions as blue pill buttons.
   3. User taps a pill (auto-accepted) or types freely.
@@ -247,7 +247,7 @@ The `categoryCheckDone` flag resets when **Re-run** is used, so a new extraction
 | NEW_VARIETY | `expiry_date`, `qty_required` |
 
 3.2 If **valid** → skip to Step 4 (fuzzy match check).
-3.3 If **invalid** → chat view switches to "Missing Details" mode. AI is given `currentExtraction` + `missingKeys` + the user's natural language reply → returns `updated_extraction` JSON.
+3.3 If **invalid** → chat view switches to "Confirm Details" mode (missing-fields sub-step). AI is given `currentExtraction` + `missingKeys` + the user's natural language reply → returns `updated_extraction` JSON.
 3.4 After each chat turn the extraction is re-validated. If now valid → proceed to Step 4. If still missing → continue chat.
 
 #### `/api/ai/fill-missing` — request modes
@@ -276,11 +276,17 @@ If **all** brands and products are either exact matches or have no suggestions �
 
 #### 4.4 Fuzzy-match view (user picks)
 Shown when at least one brand or product has suggestions but no exact match.
-- **Blue pills** = catalog suggestions (carry `brand_id`/`product_id` and buyer/TL IDs).
-- **Gray pill** = "as typed" (user's original input; carries no catalog ID or buyer/TL ID).
-- User may edit the gray pill text in-place before selecting it.
-- **Confirm** → calls `buildMergedExtraction()` then saves.
-- **Skip** → saves without any catalog IDs (assignee will be null).
+- **Input field** shows the current value (labeled "You entered"). It is editable only when "As typed" is selected.
+- **Horizontal scroll pill row** below the input shows options:
+  - First pill is always **"As typed"** — preserves the original query with no catalog ID.
+  - Remaining pills are catalog suggestions (carry `brand_id`/`product_id` and buyer/TL IDs).
+- **Tick icon** prefix appears on the selected pill. Selected pills use a slightly darker green (`bg-green-100`) instead of inverted colors.
+- **Tap a catalog pill** → populates the input with that value, locks the input (read-only), and links the catalog ID.
+- **Tap "As typed"** → reverts input to the original query, unlocks the input for editing, and clears the catalog ID.
+- **Typing in the input** while "As typed" is selected automatically switches to typed mode and clears any linked catalog ID.
+- **Product sections** are numbered: "Product #1", "Product #2", etc.
+- **Confirm & Save** → calls `buildMergedExtraction()` then saves.
+- No "Save as typed" secondary button — the user can achieve the same by keeping every section on "As typed".
 
 #### 4.5 `buildMergedExtraction()` merge rules
 - Overwrites `label_name` and `label_id` with the selected label pick (if any).
