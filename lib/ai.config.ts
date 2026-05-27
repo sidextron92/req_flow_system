@@ -42,7 +42,8 @@ function buildCommonRules(currentDate: string): string {
 - Match category_name exactly to one of the categories listed above if possible.
 - Do NOT output label_id or product_id fields. These are system-assigned IDs that will be looked up separately — never infer or generate them.
 - For expiry_date: parse relative deadline phrases (in any language, including Hindi/Hinglish including examples like "kal tak" (tomorrow), "parso tak" (day after tomorrow)) and compute the absolute date using today (${currentDate}) as the base. Round up partial days.
-- IMPORTANT — size range rule: all categories in this system are apparel or footwear. When the manager's notes contain a number range (e.g. "6 se 9", "7 to 10", "size 6-9", "no. 6 se 9 tak") ALWAYS interpret it as a shoe/garment SIZE RANGE, never as a time of day or delivery window. Capture the size range in the product notes (e.g. "sizes 6–9"). Only interpret a number range as a time if it is explicitly marked with "AM", "PM", "baje", or a similar time indicator.`;
+- IMPORTANT — size range rule: all categories in this system are apparel or footwear. When the manager's notes contain a number range (e.g. "6 se 9", "7 to 10", "size 6-9", "no. 6 se 9 tak") ALWAYS interpret it as a shoe/garment SIZE RANGE, never as a time of day or delivery window. Capture the size range in the product notes (e.g. "sizes 6–9"). Only interpret a number range as a time if it is explicitly marked with "AM", "PM", "baje", or a similar time indicator.
+- For expected_price: extract the approximate price per unit including tax. Convert any text-based price mentions (e.g. "400 rupaye", "char sau", "five hundred") into digits and output as a number (e.g. 400, 500). If no price is mentioned, set to null.`;
 }
 
 /** Returns today's date as YYYY-MM-DD in local time. */
@@ -69,6 +70,7 @@ Your task is to extract as much information as possible and return it as a JSON 
   "label_name": string | null,        // Product/brand name visible on packaging or label (e.g. ASIAN, CAMPUS, BATA)
   "category_name": string | null,     // Product category — pick exactly from: ${CATEGORY_LIST}
   "expiry_date": string | null,       // Delivery deadline in ISO format YYYY-MM-DD. Resolve relative phrases in the notes (e.g. "within 3 days", "agle 10 din mein") by adding that many days to today (${currentDate}). If no deadline is mentioned, set to null.
+  "expected_price": number | null,    // Approximate price per unit including tax in INR. Convert text prices (e.g. "400 rupaye", "char sau") to digits.
   "remarks": string | null,           // Notes + any additional observations or context relevant for the requirement
   "products": [                       // All products that need restocking (can be multiple)
     {
@@ -80,6 +82,7 @@ Your task is to extract as much information as possible and return it as a JSON 
     "label_name": number,             // 0.0–1.0
     "category_name": number,
     "expiry_date": number,
+    "expected_price": number,
     "products": number
   },
   "extraction_notes": string | null   // Caveats, ambiguities, or fields you could not extract
@@ -110,6 +113,7 @@ Your task is to extract as much information as possible and return it as a JSON 
   "category_name": string | null,     // Product category — pick exactly from: ${CATEGORY_LIST}
   "expiry_date": string | null,       // Delivery deadline in ISO format YYYY-MM-DD. Resolve relative phrases in the notes (e.g. "within 3 days", "agle 10 din mein") by adding that many days to today (${currentDate}). If no deadline is mentioned, set to null.
   "qty_required": string | null,      // Total quantity (units/pairs/pieces) requested for this label. Extract numbers + unit if visible (e.g. "50 pairs", "100 units"). If not mentioned, set to null.
+  "expected_price": number | null,    // Approximate price per unit including tax in INR. Convert text prices (e.g. "400 rupaye", "char sau") to digits.
   "remarks": string | null,           // Why this label should be added, any business context from notes
   "products": [                       // One primary/representative product for this label (max 1 for NEW_LABEL)
     {
@@ -122,6 +126,7 @@ Your task is to extract as much information as possible and return it as a JSON 
     "category_name": number,
     "expiry_date": number,
     "qty_required": number,
+    "expected_price": number,
     "products": number
   },
   "extraction_notes": string | null   // Caveats, ambiguities, or fields you could not extract
@@ -152,6 +157,7 @@ Your task is to extract as much information as possible and return it as a JSON 
   "category_name": string | null,     // Product category — pick exactly from: ${CATEGORY_LIST}
   "expiry_date": string | null,       // Delivery deadline in ISO format YYYY-MM-DD. Resolve relative phrases in the notes (e.g. "within 3 days", "agle 10 din mein") by adding that many days to today (${currentDate}). If no deadline is mentioned, set to null.
   "qty_required": string | null,      // Total quantity (units/pairs/pieces) requested for this variety. Extract numbers + unit if visible (e.g. "30 pairs", "50 units"). If not mentioned, set to null.
+  "expected_price": number | null,    // Approximate price per unit including tax in INR. Convert text prices (e.g. "400 rupaye", "char sau") to digits.
   "remarks": string | null,           // What makes this a new variety, customer demand context from notes
   "products": [                       // The new variety/variants to be added (can be multiple if several variants shown)
     {
@@ -164,6 +170,7 @@ Your task is to extract as much information as possible and return it as a JSON 
     "category_name": number,
     "expiry_date": number,
     "qty_required": number,
+    "expected_price": number,
     "products": number
   },
   "extraction_notes": string | null   // Caveats, ambiguities, or fields you could not extract

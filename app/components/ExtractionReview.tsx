@@ -178,6 +178,7 @@ export default function ExtractionReview({
           category_name:     finalExtraction.category_name ?? null,
           expiry_date:       finalExtraction.expiry_date   ?? null,
           qty_required:      finalExtraction.qty_required  ?? null,
+          expected_price:    finalExtraction.expected_price != null ? Number(finalExtraction.expected_price) : null,
           remarks:           finalExtraction.remarks        ?? null,
           products,
           bijnis_buyer_id:   bijnis_buyer_id ?? null,
@@ -421,8 +422,22 @@ export default function ExtractionReview({
       }
     }
 
-    // ── Normal validation ────────────────────────────────────
-    const validation = validateExtraction(extraction, requirementType);
+    // ── Price confidence check ───────────────────────────────
+    // If expected_price confidence < 0.9, force it into missing fields
+    const conf = extraction.confidence as Record<string, number> | null | undefined;
+    const priceConfidence = conf?.expected_price ?? (extraction.expected_price != null ? 1 : 0);
+    let validation = validateExtraction(extraction, requirementType);
+    if (priceConfidence < 0.9) {
+      const priceLabel = "Expected price per unit (including tax)";
+      const priceKey = "expected_price";
+      if (!validation.missingKeys.includes(priceKey)) {
+        validation = {
+          valid: false,
+          missingFields: [...validation.missingFields, priceLabel],
+          missingKeys: [...validation.missingKeys, priceKey],
+        };
+      }
+    }
 
     if (validation.valid) {
       await runFuzzyMatchCheck(extraction);
@@ -601,7 +616,19 @@ export default function ExtractionReview({
       }
 
       const updated: Record<string, unknown> = json.data.updated_extraction;
-      setExtraction(updated);
+
+      // If we just filled expected_price via chat, bump its confidence so we don't loop back to chat
+      if (pendingValidation?.missingKeys.includes("expected_price")) {
+        setExtraction({
+          ...updated,
+          confidence: {
+            ...(updated.confidence as Record<string, number> || {}),
+            expected_price: 1,
+          },
+        });
+      } else {
+        setExtraction(updated);
+      }
 
       const newValidation = validateExtraction(updated, requirementType);
       setPendingValidation(newValidation);

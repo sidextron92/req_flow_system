@@ -98,6 +98,9 @@ CREATE TABLE IF NOT EXISTS requirements (
   -- Quantity required (mandatory for NEW_LABEL and NEW_VARIETY)
   qty_required        VARCHAR,
 
+  -- Expected price (mandatory for all requirement types)
+  expected_price      NUMERIC(10,2),
+
   -- Free text
   remarks             TEXT,
 
@@ -239,6 +242,9 @@ CREATE TRIGGER log_requirement_changes_trigger
 
 -- Add qty_required field (mandatory for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
+
+-- Add expected_price field (mandatory for all requirement types)
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS expected_price NUMERIC(10,2);
 
 -- Add updated_by to requirements (used by audit trigger)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;

@@ -45,15 +45,17 @@ Your task:
 1. Extract values for the missing fields from the manager's message.
 2. Return a JSON object containing ONLY the fields that were missing, with their newly extracted values.
 3. For expiry_date: if the manager mentions a relative deadline (e.g. "within 3 days", "agle 10 din mein", "kal tak"), compute the absolute date by adding that many days to today (${currentDate}) and return it in YYYY-MM-DD format.
-4. If a missing field still cannot be determined from the message, set it to null.
-5. For "products": return the full array with at least one object: { "product_name": string, "notes": string | null }.
+4. For expected_price: convert any text-based price (e.g. "400 rupaye", "char sau", "five hundred") into digits and return as a number.
+5. If a missing field still cannot be determined from the message, set it to null.
+6. For "products": return the full array with at least one object: { "product_name": string, "notes": string | null }.
 
 Only output valid JSON. No markdown, no explanation outside the JSON.
 
 Example output shape (only include keys that were missing):
 {
   "label_name": "ASIAN",
-  "expiry_date": "2026-03-05"
+  "expiry_date": "2026-03-05",
+  "expected_price": 400
 }`;
 }
 

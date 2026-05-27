@@ -18,7 +18,7 @@ export async function GET(
         id, type, status,
         label_name, label_id,
         category_id, category_name,
-        expiry_date, remarks, qty_required,
+        expiry_date, remarks, qty_required, expected_price,
         attachments, comment_log,
         created_at, updated_at,
         assigned_to_user_id, assigned_date,
@@ -114,6 +114,7 @@ interface PatchBody {
   category_name?: string | null;
   expiry_date?: string | null;
   qty_required?: string | null;
+  expected_price?: number | null;
   remarks?: string | null;
   products?: Product[];
   bijnis_buyer_id?: string | null;  // from fuzzy-match product result
@@ -181,7 +182,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { userId, label_name, label_id, category_name, expiry_date, qty_required, remarks, products, bijnis_buyer_id, supply_tl_id, extracted_data, model_used } = body;
+  const { userId, label_name, label_id, category_name, expiry_date, qty_required, expected_price, remarks, products, bijnis_buyer_id, supply_tl_id, extracted_data, model_used } = body;
 
   // ── 1. Resolve assignee via rule engine ────────────────────
   const assigneeId = await resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id, category_name);
@@ -199,8 +200,9 @@ export async function PATCH(
   if (label_id      !== undefined) updatePayload.label_id      = label_id      || null;
   if (category_name !== undefined) updatePayload.category_name = category_name || null;
   if (expiry_date   !== undefined) updatePayload.expiry_date   = expiry_date   || null;
-  if (qty_required  !== undefined) updatePayload.qty_required  = qty_required  || null;
-  if (remarks       !== undefined) updatePayload.remarks       = remarks       || null;
+  if (qty_required   !== undefined) updatePayload.qty_required   = qty_required   || null;
+  if (expected_price !== undefined) updatePayload.expected_price = expected_price ?? null;
+  if (remarks        !== undefined) updatePayload.remarks        = remarks        || null;
 
   updatePayload.assigned_to_user_id = assigneeId;
   if (assigneeId !== null) updatePayload.assigned_date = new Date().toISOString();

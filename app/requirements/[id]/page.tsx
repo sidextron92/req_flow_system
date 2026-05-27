@@ -45,6 +45,7 @@ interface Requirement {
   expiry_date: string | null;
   remarks: string | null;
   qty_required: string | null;
+  expected_price: number | null;
   attachments: Attachment[];
   comment_log: (CommentEntry | CommentEntry[])[];
   created_at: string;
@@ -1668,6 +1669,9 @@ function DetailContent() {
               )}
               <Row label="Category" value={req.category_name} />
               {req.qty_required && <Row label="Qty required" value={req.qty_required} />}
+              {req.expected_price != null && (
+                <Row label="Exp Price" value={`₹${req.expected_price}`} />
+              )}
             </div>
           </Section>
 

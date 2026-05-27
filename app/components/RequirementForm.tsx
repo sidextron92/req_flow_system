@@ -612,10 +612,10 @@ export default function RequirementForm({
             />
             <p className="text-xs text-gray-500">
               {type === "Restock"
-                ? "Mention product codes (e.g. ASIAN 010) and delivery deadline"
+                ? "Mention product codes (e.g. ASIAN 010), delivery deadline and appx price"
                 : type === "New Label" || type === "New Variety"
-                ? "Mention brand name, quantity needed, and delivery deadline"
-                : "Make sure to mention Quantity and Deadline information"}
+                ? "Mention brand name, quantity needed, delivery deadline and appx price"
+                : "Make sure to mention Quantity, Deadline and Price information"}
             </p>
           </div>
 
