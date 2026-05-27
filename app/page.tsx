@@ -33,6 +33,7 @@ interface Requirement {
   assigned_to_user_id: number | null;
   assignee: { name: string } | null;
   requirement_products: RequirementProduct[];
+  products_suggested_count: number;
 }
 
 interface AssignedRequirement extends Requirement {
@@ -224,6 +225,11 @@ function RequirementCard({
           {req.status.replace(/_/g, " ")}
         </span>
         <DaysLeftBadge expiry={req.expiry_date} />
+        {(req.products_suggested_count ?? 0) > 0 && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+            {req.products_suggested_count} suggested
+          </span>
+        )}
       </div>
 
       {req.status !== "DRAFT" && (req.assignee?.name || req.status === "OPEN") && (
@@ -311,6 +317,11 @@ function AssignedRequirementCard({
           {req.status.replace(/_/g, " ")}
         </span>
         <DaysLeftBadge expiry={req.expiry_date} />
+        {(req.products_suggested_count ?? 0) > 0 && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+            {req.products_suggested_count} suggested
+          </span>
+        )}
       </div>
 
       {creatorLine && (

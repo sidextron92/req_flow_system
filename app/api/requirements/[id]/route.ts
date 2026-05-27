@@ -11,7 +11,7 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const [{ data, error }, { data: statusLogs, error: statusLogsError }] = await Promise.all([
+  const [{ data, error }, { data: statusLogs, error: statusLogsError }, { data: mappedProducts, error: mappedError }] = await Promise.all([
     supabaseAdmin
       .from("requirements")
       .select(`
@@ -22,7 +22,7 @@ export async function GET(
         attachments, comment_log,
         created_at, updated_at,
         assigned_to_user_id, assigned_date,
-        created_by,
+        created_by, products_suggested_count,
         requirement_products ( id, product_id, product_name, notes )
       `)
       .eq("id", id)
@@ -32,7 +32,18 @@ export async function GET(
       .select("id, change_type, old_value, new_value, changed_by, changed_at")
       .eq("requirement_id", id)
       .order("changed_at", { ascending: true }),
+    supabaseAdmin
+      .from("mapped_products")
+      .select("id, productid, brandid, productname, variantid, landingprice, image_url, article_code, colorname, availablestock, createdby, createdat, updatedat")
+      .eq("requirementid", id)
+      .order("updatedat", { ascending: false }),
   ]);
+
+  if (mappedError) {
+    console.error("Failed to fetch mapped_products:", mappedError.message);
+  } else if (data && mappedProducts) {
+    (data as Record<string, unknown>).mapped_products = mappedProducts;
+  }
 
   if (error) {
     const status = error.code === "PGRST116" ? 404 : 500;

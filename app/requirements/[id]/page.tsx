@@ -34,6 +34,22 @@ interface Attachment {
   storage_path: string;
 }
 
+interface MappedProduct {
+  id: string;
+  productid: string;
+  brandid: string | null;
+  productname: string | null;
+  variantid: string;
+  landingprice: number | null;
+  image_url: string | null;
+  article_code: string | null;
+  colorname: string | null;
+  availablestock: string | null;
+  createdby: number | null;
+  createdat: string;
+  updatedat: string;
+}
+
 interface Requirement {
   id: string;
   type: string;
@@ -53,7 +69,9 @@ interface Requirement {
   created_by: number;
   assigned_to_user_id: number | null;
   assigned_date: string | null;
+  products_suggested_count: number;
   requirement_products: RequirementProduct[];
+  mapped_products: MappedProduct[];
 }
 
 interface AssignedUser {
@@ -1638,7 +1656,7 @@ function DetailContent() {
 
       {/* Body */}
       {activeTab === "requirement" ? (
-        <div className="flex-1 px-4 py-5 flex flex-col gap-4 pb-8">
+        <div className="flex-1 px-4 py-5 flex flex-col gap-4 pb-24">
 
           {/* Collapsible Overview */}
           <CollapsibleOverview
@@ -1706,6 +1724,41 @@ function DetailContent() {
           {req.attachments.length > 0 && (
             <AttachmentsSection attachments={req.attachments} />
           )}
+
+          {/* Suggested Products */}
+          {req.mapped_products && req.mapped_products.length > 0 && (
+            <Section title={`Suggested Products (${req.mapped_products.length})`}>
+              <div className="grid grid-cols-2 gap-3">
+                {req.mapped_products.map((p) => (
+                  <div key={p.id} className="bg-white rounded-2xl border border-gray-200 p-3 flex flex-col gap-2">
+                    <div className="aspect-square rounded-xl overflow-hidden bg-gray-100">
+                      {p.image_url ? (
+                        <img
+                          src={p.image_url}
+                          alt={p.productname ?? "Product"}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">No image</div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{p.productname ?? "—"}</p>
+                      {p.colorname && <p className="text-xs text-gray-500">{p.colorname}</p>}
+                      {p.landingprice != null && (
+                        <span className="text-sm font-bold text-gray-900">₹{p.landingprice.toFixed(2)}</span>
+                      )}
+                      {p.availablestock && (
+                        <span className="self-start text-xs font-semibold text-white bg-green-600 px-2 py-0.5 rounded-full">{p.availablestock}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
         </div>
       ) : (
         <div className="flex-1 flex flex-col min-h-0 px-4 py-4">
@@ -1716,6 +1769,20 @@ function DetailContent() {
             requirementId={req.id}
             onNewComment={handleNewComment}
           />
+        </div>
+      )}
+
+      {/* Sticky Suggest Products CTA */}
+      {activeTab === "requirement" && userRole === "bijnisBuyer" && (
+        <div className="fixed bottom-0 left-0 right-0 z-30 flex justify-center bg-white/90 backdrop-blur-sm border-t border-gray-200 px-4 py-3">
+          <div className="w-full max-w-md">
+            <button
+              onClick={() => router.push(`/requirements/${req.id}/suggest-products?userId=${userId}`)}
+              className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-base py-3.5 rounded-2xl transition-colors shadow-sm"
+            >
+              + Suggest Products
+            </button>
+          </div>
         </div>
       )}
 

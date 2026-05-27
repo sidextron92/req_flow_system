@@ -262,6 +262,34 @@ ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS bijnis_buyer_name TEXT;
 ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_id TEXT;
 ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_name TEXT;
 
+-- ============================================================
+-- MAPPED PRODUCTS (Suggested products from trading API)
+-- ============================================================
+
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS products_suggested_count INT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS mapped_products (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  productid        TEXT NOT NULL,
+  requirementid    UUID NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+  brandid          TEXT,
+  productname      TEXT,
+  variantid        TEXT NOT NULL,
+  landingprice     NUMERIC(10,2),
+  image_url        TEXT,
+  article_code     TEXT,
+  gender           TEXT,
+  availablestock   TEXT,
+  colorname        TEXT,
+  createdby        BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  createdat        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updatedat        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mapped_products_req_variant ON mapped_products(requirementid, variantid);
+CREATE INDEX IF NOT EXISTS idx_mapped_products_requirementid ON mapped_products(requirementid);
+CREATE INDEX IF NOT EXISTS idx_mapped_products_updatedat ON mapped_products(updatedat DESC);
+
 
 -- ============================================================
 -- BRAND PRODUCT DATA

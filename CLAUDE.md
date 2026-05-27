@@ -42,6 +42,9 @@ npm run lint   # ESLint
 | `app/settings/page.tsx` | Settings page at `/settings?userId=<id>` — shows subscription status, device info, resubscribe |
 | `worker/index.js` | Service worker push handler + notificationclick deep-link opener — compiled by next-pwa and injected via `importScripts` into `sw.js` |
 | `app/api/upload/chat/route.ts` | Multipart file upload endpoint → `reqflow_attachments` Supabase bucket; validates type + 5 MB; returns public URL |
+| `app/api/trading-products/route.ts` | POST — Proxies to Bijnis trading API (`/g/ss/retool/trading/trading-session-rm-variant-list`) with `Token-X` auth; returns `{ data: products[], resultCount }` |
+| `app/api/requirements/[id]/suggest-products/route.ts` | POST — Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
+| `app/requirements/[id]/suggest-products/page.tsx` | Suggest Products page — trading product grid with search, pagination, selection, sticky CTA |
 
 ## API routes
 | Route | Method | What it does |
@@ -54,6 +57,8 @@ npm run lint   # ESLint
 | `/api/requirements/[id]/status` | PATCH | Role-gated status transition; validates role + transition, writes audit log |
 | `/api/requirements/[id]/assign` | PATCH | Reassign to a different bijnisBuyer; only current assignee (role=bijnisBuyer) can call; status must be OPEN or IN_PROCESS; ASSIGNMENT_CHANGE written via DB trigger; assigned_date unchanged |
 | `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array; accepts optional `attachments: string[]` of Supabase public URLs; comment text is optional if attachments are present |
+| `/api/requirements/[id]/suggest-products` | POST | Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
+| `/api/trading-products` | POST | Proxies to Bijnis trading API (`/g/ss/retool/trading/trading-session-rm-variant-list`) with `Token-X` auth; returns `{ data: products[], resultCount }` |
 | `/api/upload/chat` | POST | Upload a single file (multipart) to `reqflow_attachments` bucket; validates type + 5 MB limit; returns `{ url }` |
 | `/api/user` | GET | User info from users table |
 | `/api/users/bijnisBuyers` | GET | All users with role='bijnisBuyer' (id, name, phone); used by reassign bottom sheet |
@@ -68,8 +73,9 @@ npm run lint   # ESLint
 ## DB schema (key tables)
 - **users** — `id BIGINT PK`, name, role, phone, darkstore_id, darkstore_name
 - **categories** — `id UUID PK`, name
-- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date
+- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
+- **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
 - **brand_product_data** — brand_name, brand_id, product_name, product_id. Has GiST trigram indexes for fuzzy search
 - **ai_extractions** — requirement_id FK, extracted_data JSONB, model_used
 - **status_update_log** — audit trail for status/assignment/field changes
@@ -102,6 +108,7 @@ DEEPGRAM_API_KEY=
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:admin@reqflow.com
+BIJNIS_TRADING_API_TOKEN=
 ```
 
 ## Chat Attachment System
@@ -163,6 +170,7 @@ Generated once via `npx web-push generate-vapid-keys`. Public key is `NEXT_PUBLI
 | Final save (new assignment) | `app/api/requirements/[id]/route.ts` | Assignee |
 | Status change | `app/api/requirements/[id]/status/route.ts` | Creator (when assignee acts) or Assignee (when creator acts) |
 | Reassignment | `app/api/requirements/[id]/assign/route.ts` | New assignee |
+| Products suggested | `app/api/requirements/[id]/suggest-products/route.ts` | Creator |
 
 All notifications are fire-and-forget (IIFE async) — failures never affect the API response.
 
@@ -527,6 +535,46 @@ Filter state is a `FilterKey` string (not a raw status value). Filtering logic l
 - `BY_ME_FILTERS` / `FOR_ME_FILTERS` — ordered filter definitions `{ key, label }[]`
 - `BY_ME_STATUS_SETS` / `FOR_ME_STATUS_SETS` — `Record<FilterKey, Set<string>>` for simple status-based filters
 - `action_pending` is handled with custom logic (not in `BY_ME_STATUS_SETS`)
+
+---
+
+### Step 9 — Suggest Products workflow (`app/requirements/[id]/suggest-products/page.tsx` + `POST /api/requirements/[id]/suggest-products`)
+
+#### 9.1 Who can suggest
+Any user with `role = 'bijnisBuyer'` sees the **"Suggest Products"** sticky button on the requirement detail page. The button navigates to `/requirements/[id]/suggest-products?userId=X`.
+
+#### 9.2 Trading API fetch
+On mount the page loads the requirement to get `category_name` and `created_by`, then POSTs to `/api/trading-products` with:
+- `userId = created_by` (requirement creator's ID)
+- `categoryName = requirement.category_name`
+- `query = search phrase` (optional)
+- `start`, `size = 20`
+
+The proxy calls `https://api.bijnis.com/g/ss/retool/trading/trading-session-rm-variant-list` with `Token-X` header and returns `payload` array + `resultCount`.
+
+#### 9.3 Product grid
+- Two-column grid cards showing: image, checkbox, product name, color name, landing price, MRP, margin, remaining lots pill
+- **Green pill** for in-stock products (`remainingLotInfo.text`)
+- **Red pill** for sold out products (`text === "All Lots Sold"`)
+- Sold-out products are greyed out (`opacity-50`) with disabled checkbox
+- Pagination via infinite scroll (IntersectionObserver, `size = 20`)
+- Search bar is sticky with debounced input + manual Search CTA
+
+#### 9.4 Selection UX
+- Tap card or checkbox to select/unselect
+- **"Show X selected"** toggles a filtered view of only selected products
+- In selected view: uncheck removes from selection, "Clear all" removes everything, "Back to results" returns to full list
+- Selections are maintained across pagination (products already in `selectedMap` stay selected when new pages load)
+- Existing mapped products are pre-selected on page load
+
+#### 9.5 Save
+Sticky bottom button **"Suggest X Products"** appears when `selectedMap.size > 0`. On click it POSTs to `/api/requirements/[id]/suggest-products` with the full selection array. Server:
+1. Upserts each product into `mapped_products` (`ON CONFLICT (requirementid, variantid) DO UPDATE`)
+2. Recalculates `products_suggested_count` on the requirement row
+3. Sends push notification to creator: `"X products mapped for your requirement of $label_name$"`
+
+#### 9.6 Display on detail page
+A collapsible **"Suggested Products (X)"** section appears below Attachments on the requirement detail page, showing the same 2-column grid with image, name, color, landing price, and available stock pill. The home page requirement card shows a blue **"X suggested"** pill badge when `products_suggested_count > 0`.
 
 ---
 
