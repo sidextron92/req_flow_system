@@ -262,6 +262,9 @@ ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS bijnis_buyer_name TEXT;
 ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_id TEXT;
 ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_name TEXT;
 
+-- Add category column to brand_product_data for scoped fuzzy search
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS category_name TEXT;
+
 -- ============================================================
 -- MAPPED PRODUCTS (Suggested products from trading API)
 -- ============================================================
@@ -321,6 +324,9 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_brand_trgm   ON brand_product_data USING gist (brand_name   gist_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_product_trgm ON brand_product_data USING gist (product_name gist_trgm_ops);
 
+-- Index for category-scoped fuzzy search
+CREATE INDEX IF NOT EXISTS idx_brand_product_category ON brand_product_data(category_name);
+
 
 -- ============================================================
 -- FUZZY SEARCH RPC FUNCTIONS
@@ -355,7 +361,7 @@ $$;
 -- DISTINCT ON (lower(product_name)) deduplicates product name variants.
 -- brand_id / brand_name let the client derive label info from a matched product.
 -- bijnis_buyer_id / bijnis_buyer_name are sourced from the highest-scoring row per product.
-CREATE OR REPLACE FUNCTION fuzzy_search_products(query TEXT, result_limit INT DEFAULT 5)
+CREATE OR REPLACE FUNCTION fuzzy_search_products(query TEXT, result_limit INT DEFAULT 5, category_filter TEXT DEFAULT NULL)
 RETURNS TABLE (product_name TEXT, product_id TEXT, brand_id TEXT, brand_name TEXT, bijnis_buyer_id TEXT, bijnis_buyer_name TEXT, score REAL)
 LANGUAGE sql STABLE
 AS $$
@@ -370,7 +376,11 @@ AS $$
       p2.bijnis_buyer_name,
       similarity(p2.product_name, query) AS score
     FROM brand_product_data p2
-    WHERE similarity(p2.product_name, query) > 0.15
+    WHERE (
+      similarity(p2.product_name, query) > 0.15
+      OR (LENGTH(query) < 3 AND p2.product_name ILIKE '%' || query || '%')
+    )
+      AND (category_filter IS NULL OR p2.category_name = category_filter)
     ORDER BY lower(p2.product_name), similarity(p2.product_name, query) DESC
   ) p
   ORDER BY p.score DESC

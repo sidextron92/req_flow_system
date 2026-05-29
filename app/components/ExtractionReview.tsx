@@ -110,6 +110,10 @@ export default function ExtractionReview({
             .map((p) => String(p.product_name ?? "").trim())
             .filter(Boolean)
         : [];
+      const category_name =
+        typeof extraction!.category_name === "string" && extraction!.category_name.trim()
+          ? extraction!.category_name.trim()
+          : undefined;
 
       if (!label_name && product_names.length === 0) {
         setPrefetchResult({ checked: true, needsInput: false });
@@ -121,7 +125,7 @@ export default function ExtractionReview({
         const res = await fetch("/api/brand-product/fuzzy-search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label_name, product_names }),
+          body: JSON.stringify({ label_name, product_names, category_name }),
         });
         const json = await res.json();
 
@@ -262,6 +266,10 @@ export default function ExtractionReview({
           .map((p) => String(p.product_name ?? "").trim())
           .filter(Boolean)
       : [];
+    const category_name =
+      typeof finalExtraction.category_name === "string" && finalExtraction.category_name.trim()
+        ? finalExtraction.category_name.trim()
+        : undefined;
 
     // For NEW_VARIETY there's no label_name — only check products
     if (!label_name && product_names.length === 0) {
@@ -275,7 +283,7 @@ export default function ExtractionReview({
       const res = await fetch("/api/brand-product/fuzzy-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label_name, product_names }),
+        body: JSON.stringify({ label_name, product_names, category_name }),
       });
       const json = await res.json();
 

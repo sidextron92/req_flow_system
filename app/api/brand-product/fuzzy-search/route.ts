@@ -8,6 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 interface FuzzySearchBody {
   label_name?: string;
   product_names?: string[];
+  category_name?: string;
 }
 
 interface BrandRow   { brand_name: string; brand_id: string; supply_tl_id: string | null; supply_tl_name: string | null; score: number }
@@ -37,11 +38,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { label_name, product_names } = body;
+  const { label_name, product_names, category_name } = body;
 
   if (!label_name && (!product_names || product_names.length === 0)) {
     return NextResponse.json({ error: "Provide label_name and/or product_names" }, { status: 400 });
   }
+
+  const categoryFilter = category_name?.trim() || null;
 
   // ── Label search ──────────────────────────────────────────────────────────
 
@@ -96,6 +99,7 @@ export async function POST(req: NextRequest) {
         const { data, error } = await supabaseAdmin.rpc("fuzzy_search_products", {
           query,
           result_limit: SUGGESTION_LIMIT,
+          category_filter: categoryFilter,
         });
         return { query, rows: (data ?? []) as ProductRow[], error };
       })
