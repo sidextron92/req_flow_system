@@ -59,6 +59,7 @@ interface Requirement {
   category_id: string | null;
   category_name: string | null;
   expiry_date: string | null;
+  notes: string | null;
   remarks: string | null;
   qty_required: string | null;
   expected_price: number | null;
@@ -1693,10 +1694,23 @@ function DetailContent() {
             </div>
           </Section>
 
-          {/* Remarks */}
-          {req.remarks && (
-            <Section title="Remarks">
-              <p className="text-sm text-gray-700 leading-relaxed">{req.remarks}</p>
+          {/* Original Notes & Remarks */}
+          {(req.notes || req.remarks) && (
+            <Section title="Notes & Remarks">
+              <div className="flex flex-col gap-3">
+                {req.notes && (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Original Notes</span>
+                    <p className="text-sm text-gray-700 leading-relaxed">{req.notes}</p>
+                  </div>
+                )}
+                {req.remarks && (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Remarks (AI Extracted)</span>
+                    <p className="text-sm text-gray-700 leading-relaxed">{req.remarks}</p>
+                  </div>
+                )}
+              </div>
             </Section>
           )}
 

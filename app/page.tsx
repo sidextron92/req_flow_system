@@ -27,6 +27,7 @@ interface Requirement {
   label_name: string | null;
   category_name: string | null;
   expiry_date: string | null;
+  notes: string | null;
   remarks: string | null;
   created_at: string;
   comment_log: CommentEntry[] | null;

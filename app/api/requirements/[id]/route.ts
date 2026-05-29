@@ -18,7 +18,7 @@ export async function GET(
         id, type, status,
         label_name, label_id,
         category_id, category_name,
-        expiry_date, remarks, qty_required, expected_price,
+        expiry_date, notes, remarks, qty_required, expected_price,
         attachments, comment_log,
         created_at, updated_at,
         assigned_to_user_id, assigned_date,

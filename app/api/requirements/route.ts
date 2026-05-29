@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     .select(`
       id, type, status, label_name, label_id,
       category_id, category_name, expiry_date,
-      remarks, qty_required, expected_price, attachments, comment_log, created_at, updated_at,
+      notes, remarks, qty_required, expected_price, attachments, comment_log, created_at, updated_at,
       assigned_to_user_id, assigned_date, products_suggested_count,
       assignee:users!requirements_assigned_to_user_id_fkey ( name ),
       requirement_products ( id, product_id, product_name, notes )
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
 
   const userId      = formData.get("userId") as string;
   const typeRaw     = formData.get("type") as string;   // UI value e.g. "New Label"
+  const notesRaw    = formData.get("notes") as string | null;
   const labelName   = formData.get("labelName") as string | null;
   const labelId     = formData.get("labelId") as string | null;
   const categoryId  = formData.get("categoryId") as string | null;
@@ -129,6 +130,7 @@ export async function POST(req: NextRequest) {
     .from("requirements")
     .insert({
       type,
+      notes:         notesRaw     || null,
       label_name:    labelName    || null,
       label_id:      labelId      || null,
       category_id:   categoryId   || null,
