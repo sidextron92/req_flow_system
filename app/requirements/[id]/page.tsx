@@ -1,5 +1,6 @@
 "use client";
 
+import { CATEGORY_NAMES } from "@/lib/ai.config";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
@@ -549,6 +550,172 @@ function ReassignSheet({
                 className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm font-medium transition-colors"
               >
                 {submitting ? "Reassigning…" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Category Edit Bottom Sheet ───────────────────────────────────────────────
+
+function CategoryEditSheet({
+  requirementId,
+  currentCategory,
+  userId,
+  onSuccess,
+  onClose,
+}: {
+  requirementId: string;
+  currentCategory: string | null;
+  userId: number;
+  onSuccess: (newCategory: string) => void;
+  onClose: () => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingCategory, setPendingCategory] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  async function confirmChange() {
+    if (!pendingCategory) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/requirements/${requirementId}/category`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, newCategory: pendingCategory }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "Failed to update category");
+      }
+      onSuccess(pendingCategory);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const filteredCategories = CATEGORY_NAMES.filter((cat) =>
+    cat.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-0">
+      <div className="bg-white rounded-t-2xl w-full max-w-md flex flex-col max-h-[75vh] shadow-xl relative">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
+          <h3 className="text-base font-bold text-gray-900">Change Category</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-4 pb-3 shrink-0">
+          <div className="relative">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search categories…"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+              autoFocus
+            />
+          </div>
+        </div>
+
+        {/* Category list */}
+        <div className="flex-1 overflow-y-auto px-4 pb-6 min-h-0">
+          {error && (
+            <p className="text-sm text-red-500 text-center py-4">{error}</p>
+          )}
+          {filteredCategories.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">
+              {search ? "No categories match your search." : "No categories available."}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {filteredCategories.map((cat) => {
+                const isCurrent = cat === currentCategory;
+                const isPending = cat === pendingCategory;
+                return (
+                  <li key={cat}>
+                    <button
+                      onClick={() => {
+                        if (isCurrent) {
+                          onClose();
+                        } else {
+                          setPendingCategory(cat);
+                        }
+                      }}
+                      disabled={submitting}
+                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-left transition-colors disabled:opacity-50 ${
+                        isPending
+                          ? "bg-green-50 ring-1 ring-green-200"
+                          : isCurrent
+                            ? "bg-gray-50 text-gray-900"
+                            : "hover:bg-gray-50 active:bg-gray-100"
+                      }`}
+                    >
+                      <span className="text-sm font-medium text-gray-900">{cat}</span>
+                      {isCurrent && (
+                        <span className="text-xs text-gray-400">Current</span>
+                      )}
+                      {isPending && (
+                        <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Confirmation overlay */}
+        {pendingCategory && (
+          <div className="absolute inset-0 rounded-t-2xl bg-white flex flex-col justify-end p-5 gap-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-base font-bold text-gray-900">Confirm Category Change</h3>
+              <p className="text-sm text-gray-500">
+                Change category to{" "}
+                <span className="font-medium text-gray-800">{pendingCategory}</span>?
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPendingCategory(null)}
+                disabled={submitting}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmChange}
+                disabled={submitting}
+                className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm font-medium transition-colors"
+              >
+                {submitting ? "Updating…" : "Confirm"}
               </button>
             </div>
           </div>
@@ -1480,6 +1647,7 @@ function DetailContent() {
   const openChat = searchParams.get("openChat") === "true";
   const [activeTab, setActiveTab]       = useState<"requirement" | "chat">(openChat ? "chat" : "requirement");
   const [showReassignSheet, setShowReassignSheet] = useState(false);
+  const [showCategorySheet, setShowCategorySheet] = useState(false);
   const [toast, setToast]               = useState<string | null>(null);
 
   const fetchReq = useCallback(async () => {
@@ -1577,6 +1745,26 @@ function DetailContent() {
     );
     setAssignedUser({ name: newAssigneeName, role: "bijnisBuyer", phone: null });
     setToast(`Reassigned to ${newAssigneeName}`);
+  }
+
+  function handleCategoryChange(newCategory: string) {
+    setShowCategorySheet(false);
+    setReq((prev) =>
+      prev ? { ...prev, category_name: newCategory } : prev
+    );
+    // Add a synthetic status update so the change shows in chat immediately
+    setStatusUpdates((prev) => [
+      ...prev,
+      {
+        id: typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : String(Date.now()),
+        change_type: "CATEGORY_CHANGE",
+        message: `Category changed to "${newCategory}"`,
+        changed_at: new Date().toISOString(),
+      },
+    ]);
+    setToast(`Category changed to ${newCategory}`);
   }
 
   if (loading) {
@@ -1686,7 +1874,23 @@ function DetailContent() {
                   }
                 />
               )}
-              <Row label="Category" value={req.category_name} />
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400">Category</span>
+                  {userRole === "bijnisBuyer" && (
+                    <button
+                      onClick={() => setShowCategorySheet(true)}
+                      className="text-gray-300 hover:text-green-600 transition-colors"
+                      aria-label="Edit category"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.25 2.25 0 113.536 3.536L6.75 21H3.75v-3L16.732 5.232z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-gray-800">{req.category_name ?? "—"}</span>
+              </div>
               {req.qty_required && <Row label="Qty required" value={req.qty_required} />}
               {req.expected_price != null && (
                 <Row label="Exp Price" value={`₹${req.expected_price}`} />
@@ -1808,6 +2012,17 @@ function DetailContent() {
           userId={userId}
           onSuccess={handleReassignSuccess}
           onClose={() => setShowReassignSheet(false)}
+        />
+      )}
+
+      {/* Category edit bottom sheet */}
+      {showCategorySheet && (
+        <CategoryEditSheet
+          requirementId={req.id}
+          currentCategory={req.category_name}
+          userId={userId}
+          onSuccess={handleCategoryChange}
+          onClose={() => setShowCategorySheet(false)}
         />
       )}
 

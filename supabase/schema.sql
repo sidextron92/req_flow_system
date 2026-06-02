@@ -27,7 +27,8 @@ CREATE TYPE requirement_status AS ENUM (
 CREATE TYPE status_change_type AS ENUM (
   'STATUS_CHANGE',
   'ASSIGNMENT_CHANGE',
-  'FIELD_UPDATE'
+  'FIELD_UPDATE',
+  'CATEGORY_CHANGE'
 );
 
 
@@ -226,6 +227,18 @@ BEGIN
     );
   END IF;
 
+  -- CATEGORY_CHANGE
+  IF OLD.category_name IS DISTINCT FROM NEW.category_name THEN
+    INSERT INTO status_update_log (requirement_id, changed_by, change_type, old_value, new_value)
+    VALUES (
+      NEW.id,
+      NEW.updated_by,
+      'CATEGORY_CHANGE',
+      OLD.category_name,
+      NEW.category_name
+    );
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -267,6 +280,16 @@ ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS category_name TEXT;
 
 -- Add raw notes column (original user input before AI extraction)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Add CATEGORY_CHANGE enum value (safe to re-run; fails gracefully if already present)
+ALTER TYPE status_change_type ADD VALUE IF NOT EXISTS 'CATEGORY_CHANGE';
+
+-- Recreate trigger to include CATEGORY_CHANGE logging
+DROP TRIGGER IF EXISTS log_requirement_changes_trigger ON requirements;
+CREATE TRIGGER log_requirement_changes_trigger
+  AFTER UPDATE ON requirements
+  FOR EACH ROW
+  EXECUTE FUNCTION log_requirement_changes();
 
 -- ============================================================
 -- MAPPED PRODUCTS (Suggested products from trading API)
