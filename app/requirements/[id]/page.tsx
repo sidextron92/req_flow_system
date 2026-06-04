@@ -1995,7 +1995,7 @@ function DetailContent() {
       )}
 
       {/* Sticky Suggest Products CTA */}
-      {activeTab === "requirement" && userRole === "bijnisBuyer" && (
+      {activeTab === "requirement" && userRole === "bijnisBuyer" && ["OPEN", "IN_PROCESS", "REVIEW_FOR_COMPLETION"].includes(req.status) && (
         <div className="fixed bottom-0 left-0 right-0 z-30 flex justify-center bg-white/90 backdrop-blur-sm border-t border-gray-200 px-4 py-3">
           <div className="w-full max-w-md">
             <button
