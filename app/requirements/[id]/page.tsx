@@ -1948,7 +1948,11 @@ function DetailContent() {
             <Section title={`Suggested Products (${req.mapped_products.length})`}>
               <div className="grid grid-cols-2 gap-3">
                 {req.mapped_products.map((p) => (
-                  <div key={p.id} className="bg-white rounded-2xl border border-gray-200 p-3 flex flex-col gap-2">
+                  <div
+                    key={p.id}
+                    className="bg-white rounded-2xl border border-gray-200 p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md transition-shadow"
+                    onClick={() => window.open(`https://traderapp.bijnis.com/pdp/?v=${p.variantid}&cs=0`, '_blank', 'noopener,noreferrer')}
+                  >
                     <div className="aspect-square rounded-xl overflow-hidden bg-gray-100">
                       {p.image_url ? (
                         <img
