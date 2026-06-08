@@ -21,7 +21,9 @@ CREATE TYPE requirement_status AS ENUM (
   'REVIEW_FOR_COMPLETION',
   'COMPLETED',
   'INCOMPLETE',
-  'PARTIALLY_COMPLETE'
+  'PARTIALLY_COMPLETE',
+  'CANNOT_BE_DONE',
+  'AUTO_CLOSED'
 );
 
 CREATE TYPE status_change_type AS ENUM (
@@ -412,3 +414,64 @@ AS $$
   ORDER BY p.score DESC
   LIMIT result_limit;
 $$;
+
+
+-- ============================================================
+-- MIGRATION-SAFE: Add missing enum values to existing DBs
+-- ============================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_enum
+    WHERE enumlabel = 'CANNOT_BE_DONE'
+    AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'requirement_status')
+  ) THEN
+    ALTER TYPE requirement_status ADD VALUE 'CANNOT_BE_DONE';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_enum
+    WHERE enumlabel = 'AUTO_CLOSED'
+    AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'requirement_status')
+  ) THEN
+    ALTER TYPE requirement_status ADD VALUE 'AUTO_CLOSED';
+  END IF;
+END $$;
+
+
+-- ============================================================
+-- AUTO-CLOSE STALE REQUIREMENTS (pg_cron)
+-- ============================================================
+
+-- Enable cron extension (run once; safe to re-run)
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- Function: auto-close requirements that have been OPEN or IN_PROCESS for 30+ days
+CREATE OR REPLACE FUNCTION auto_close_stale_requirements()
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  UPDATE requirements
+  SET status = 'AUTO_CLOSED',
+      updated_by = NULL,
+      comment_log = COALESCE(comment_log, '[]'::JSONB) || jsonb_build_array(
+        jsonb_build_object(
+          'userId', 0,
+          'name', 'System',
+          'comment', 'Automatically closed after 30 days of inactivity.',
+          'date', NOW()
+        )
+      )
+  WHERE status IN ('OPEN', 'IN_PROCESS')
+    AND created_at < NOW() - INTERVAL '30 days';
+END;
+$$;
+
+-- Schedule: run every day at 02:00 UTC
+SELECT cron.schedule(
+  'auto-close-stale-requirements',
+  '0 2 * * *',
+  'SELECT auto_close_stale_requirements()'
+);

@@ -105,6 +105,7 @@ const STATUS_COLORS: Record<string, string> = {
   INCOMPLETE:            "bg-red-100 text-red-700",
   PARTIALLY_COMPLETE:    "bg-orange-100 text-orange-700",
   CANNOT_BE_DONE:        "bg-gray-100 text-gray-500",
+  AUTO_CLOSED:           "bg-gray-100 text-gray-400",
 };
 
 // ─── Status transition rules ──────────────────────────────────────────────────
@@ -130,6 +131,7 @@ const STATUS_LABELS: Record<string, string> = {
   INCOMPLETE:            "Incomplete",
   PARTIALLY_COMPLETE:    "Partially Complete",
   CANNOT_BE_DONE:        "Cannot Be Done",
+  AUTO_CLOSED:           "Auto Closed",
 };
 
 function getAllowedTransitions(

@@ -52,6 +52,7 @@ const STATUS_COLORS: Record<string, string> = {
   COMPLETED:             "bg-green-100 text-green-700",
   INCOMPLETE:            "bg-red-100 text-red-700",
   PARTIALLY_COMPLETE:    "bg-orange-100 text-orange-700",
+  AUTO_CLOSED:           "bg-gray-100 text-gray-400",
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -66,7 +67,7 @@ const TYPE_COLORS: Record<string, string> = {
   NEW_VARIETY: "text-violet-600",
 };
 
-const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]);
+const EXCLUDED_FOR_COUNT = new Set(["DRAFT", "COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE", "AUTO_CLOSED"]);
 
 // ─── Filter definitions ────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ const FOR_ME_FILTERS: FilterDef[] = [
 
 const BY_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
   all_open: new Set(["OPEN", "IN_PROCESS", "REVIEW_FOR_COMPLETION"]),
-  closed:   new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE"]),
+  closed:   new Set(["COMPLETED", "INCOMPLETE", "PARTIALLY_COMPLETE", "CANNOT_BE_DONE", "AUTO_CLOSED"]),
 };
 
 const FOR_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
@@ -101,7 +102,7 @@ const FOR_ME_STATUS_SETS: Record<FilterKey, Set<string>> = {
   follow_up:      new Set(["REVIEW_FOR_COMPLETION"]),
   cannot_be_done: new Set(["CANNOT_BE_DONE"]),
   incomplete:     new Set(["INCOMPLETE", "PARTIALLY_COMPLETE"]),
-  closed:         new Set(["COMPLETED"]),
+  closed:         new Set(["COMPLETED", "AUTO_CLOSED"]),
 };
 
 type SortOption = "deadline_asc" | "created_desc";
