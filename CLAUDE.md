@@ -45,6 +45,8 @@ npm run lint   # ESLint
 | `app/api/trading-products/route.ts` | POST — Proxies to Bijnis trading API (`/g/ss/retool/trading/trading-session-rm-variant-list`) with `Token-X` auth; returns `{ data: products[], resultCount }` |
 | `app/api/requirements/[id]/suggest-products/route.ts` | POST — Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
 | `app/requirements/[id]/suggest-products/page.tsx` | Suggest Products page — trading product grid with search, pagination, selection, sticky CTA |
+| `app/api/requirements/[id]/reopen/route.ts` | POST — Creator reopens a closed requirement (`INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`). Clones the row, copies products + attachments, asks for new `expiry_date`, re-runs assignment, and starts at `OPEN` |
+| `app/requirements/[id]/page.tsx` | `ReopenSheet` bottom-sheet component; `Re-Opened` badge on header when `parent_requirement_id` is set |
 
 ## API routes
 | Route | Method | What it does |
@@ -55,6 +57,7 @@ npm run lint   # ESLint
 | `/api/requirements/[id]` | GET | Single requirement with products |
 | `/api/requirements/[id]` | PATCH | Save final extraction → status OPEN |
 | `/api/requirements/[id]/status` | PATCH | Role-gated status transition; validates role + transition, writes audit log |
+| `/api/requirements/[id]/reopen` | POST | Creator reopens a closed requirement (`INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`). Clones the row, copies products + attachments, asks for new `expiry_date`, re-runs assignment, and starts at `OPEN` |
 | `/api/requirements/[id]/assign` | PATCH | Reassign to a different bijnisBuyer; only current assignee (role=bijnisBuyer) can call; status must be OPEN or IN_PROCESS; ASSIGNMENT_CHANGE written via DB trigger; assigned_date unchanged |
 | `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array; accepts optional `attachments: string[]` of Supabase public URLs; comment text is optional if attachments are present |
 | `/api/requirements/[id]/suggest-products` | POST | Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
@@ -73,7 +76,7 @@ npm run lint   # ESLint
 ## DB schema (key tables)
 - **users** — `id BIGINT PK`, name, role, phone, darkstore_id, darkstore_name
 - **categories** — `id UUID PK`, name
-- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`
+- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
 - **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
 - **brand_product_data** — brand_name, brand_id, product_name, product_id. Has GiST trigram indexes for fuzzy search
@@ -189,6 +192,7 @@ All notifications are fire-and-forget (IIFE async) — failures never affect the
 - `rounded-2xl` cards, `bg-blue-600` primary CTA
 - Bottom-sheet modals with slide-up animation
 - Pill buttons for fuzzy match selection (green = all options; selected has tick icon)
+- `Re-Opened` badge: orange pill (`bg-orange-100 text-orange-700`) on home cards and detail header when `parent_requirement_id` is set
 
 ## Architecture notes
 - AI extraction returns a JSON blob; `ExtractionReview` drives a state machine: `extraction → [category-correction chat] → [missing-fields chat] → fuzzy-match → success`. The category step is skipped if `confidence.category_name ≥ 0.9` and `category_name` is non-null.
@@ -387,8 +391,13 @@ GiST trigram indexes: `idx_brand_trgm` on `brand_name`, `idx_product_trgm` on `p
 | `PARTIALLY_COMPLETE` | Creator accepted partial completion |
 | `INCOMPLETE` | Creator rejected the work |
 | `CANNOT_BE_DONE` | Assignee marked as impossible |
+| `AUTO_CLOSED` | Auto-closed by system after 30 days of inactivity |
 
 `DRAFT → OPEN` is automatic (happens during extraction finalization in Step 5 — not user-initiated).
+
+#### 6.2b Re-Open transition (creator-only, not a state transition)
+
+A creator can **re-open** a closed requirement from `INCOMPLETE`, `CANNOT_BE_DONE`, or `AUTO_CLOSED`. This is **not** a status transition on the original row — it creates a **clone** (see Step 6.5).
 
 #### 6.2 Role-based transition rules
 
@@ -411,7 +420,7 @@ A user must be the **creator** (`created_by = userId`) or the **assignee** (`ass
 | IN_PROCESS | REVIEW_FOR_COMPLETION |
 | IN_PROCESS | CANNOT_BE_DONE |
 
-Terminal states (no further transitions): `COMPLETED`, `PARTIALLY_COMPLETE`, `INCOMPLETE`, `CANNOT_BE_DONE`.
+Terminal states (no further transitions): `COMPLETED`, `PARTIALLY_COMPLETE`, `INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`.
 
 **Full transition diagram:**
 ```
@@ -419,10 +428,10 @@ DRAFT ──(auto)──► OPEN
                    │ (assignee)
                    ▼
               IN_PROCESS ──► CANNOT_BE_DONE
-                   │ (assignee)
-                   ▼
-        REVIEW_FOR_COMPLETION
-                   │ (creator)
+                   │ (assignee)                    (creator)
+                   ▼                      INCOMPLETE ───┐
+        REVIEW_FOR_COMPLETION  AUTO_CLOSED ────────────┼──► Re-Open (clone)
+                   │ (creator)          CANNOT_BE_DONE ─┘
           ┌────────┼────────┐
           ▼        ▼        ▼
       COMPLETED  PARTIALLY  INCOMPLETE
@@ -463,6 +472,40 @@ Every status change fires the `log_requirement_changes()` trigger which inserts 
 |------|------|
 | `app/requirements/[id]/page.tsx` | `StatusUpdater`, `StatusUpdateDialog`, `getAllowedTransitions`, `STATUS_COLORS`, `STATUS_LABELS` |
 | `app/api/requirements/[id]/status/route.ts` | `PATCH` handler; `CREATOR_TRANSITIONS`, `ASSIGNEE_TRANSITIONS` constants; permission + transition validation |
+
+---
+
+### Step 6.5 — Re-Open workflow (`POST /api/requirements/[id]/reopen`)
+
+#### 6.5.1 Who can reopen
+- Only the **creator** (`created_by = userId`).
+- The original requirement must be in one of these terminal states: `INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`.
+
+#### 6.5.2 What happens
+1. Client opens a **bottom-sheet** (`ReopenSheet`) asking for a **new deadline** (`expiry_date`).
+2. On confirm: `POST /api/requirements/[id]/reopen` with `{ userId, newExpiryDate }`.
+3. Server **clones** the original requirement into a new row:
+   - Copies `type`, `label_name`, `label_id`, `category_id`, `category_name`, `qty_required`, `expected_price`, `remarks`, `notes`, `attachments`
+   - Sets `status = OPEN`, `comment_log = []`, `products_suggested_count = 0`
+   - Sets `parent_requirement_id = original.id`
+   - Sets `created_by = original.created_by`, `updated_by = null`
+   - Uses the provided `newExpiryDate`
+4. Server copies `requirement_products` rows to the new requirement.
+5. Server re-runs `resolveAssignee` and `resolveType` (same logic as Step 5) on the cloned products.
+6. Server writes a `STATUS_CHANGE` entry to `status_update_log` for the clone (`old_value: null, new_value: OPEN`).
+7. Server sends push notification to the newly assigned buyer.
+8. The **original requirement is untouched** — it stays in its closed state forever.
+
+#### 6.5.3 UI indicators
+- **Detail page header**: orange `Re-Opened` pill badge next to the status badge when `parent_requirement_id` is set.
+- **Home page cards**: orange `Re-Opened` pill badge on both "by me" and "for me" cards.
+- **Re-Open button**: green `bg-green-600` button inside `CollapsibleOverview`, visible only to the creator when the status is `INCOMPLETE`, `CANNOT_BE_DONE`, or `AUTO_CLOSED`.
+
+#### 6.5.4 Key files
+| File | Role |
+|------|------|
+| `app/requirements/[id]/page.tsx` | `ReopenSheet` bottom-sheet component; `Re-Opened` badge on header; `canReopen` logic in `CollapsibleOverview` |
+| `app/api/requirements/[id]/reopen/route.ts` | `POST` handler; clone logic, re-runs `resolveAssignee`/`resolveType`, writes audit log, sends push |
 
 ---
 

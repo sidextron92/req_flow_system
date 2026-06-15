@@ -255,6 +255,14 @@ CREATE TRIGGER log_requirement_changes_trigger
 -- MIGRATIONS (run if applying to an existing DB)
 -- ============================================================
 
+-- Add parent_requirement_id to support re-opened (cloned) requirements
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS parent_requirement_id UUID REFERENCES requirements(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_requirements_parent_id ON requirements(parent_requirement_id);
+
+-- ============================================================
+-- MIGRATIONS (run if applying to an existing DB)
+-- ============================================================
+
 -- Add qty_required field (mandatory for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
 

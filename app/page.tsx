@@ -35,6 +35,7 @@ interface Requirement {
   assignee: { name: string } | null;
   requirement_products: RequirementProduct[];
   products_suggested_count: number;
+  parent_requirement_id: string | null;
 }
 
 interface AssignedRequirement extends Requirement {
@@ -232,6 +233,11 @@ function RequirementCard({
             {req.products_suggested_count} suggested
           </span>
         )}
+        {req.parent_requirement_id && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+            Re-Opened
+          </span>
+        )}
       </div>
 
       {req.status !== "DRAFT" && (req.assignee?.name || req.status === "OPEN") && (
@@ -322,6 +328,11 @@ function AssignedRequirementCard({
         {(req.products_suggested_count ?? 0) > 0 && (
           <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
             {req.products_suggested_count} suggested
+          </span>
+        )}
+        {req.parent_requirement_id && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+            Re-Opened
           </span>
         )}
       </div>

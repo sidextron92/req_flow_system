@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       id, type, status, label_name, label_id,
       category_id, category_name, expiry_date,
       notes, remarks, qty_required, expected_price, attachments, comment_log, created_at, updated_at,
-      assigned_to_user_id, assigned_date, created_by, products_suggested_count,
+      assigned_to_user_id, assigned_date, created_by, products_suggested_count, parent_requirement_id,
       requirement_products ( id, product_id, product_name, notes ),
       creator:users!requirements_created_by_fkey ( name, darkstore_name )
     `)

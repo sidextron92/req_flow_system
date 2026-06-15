@@ -1,7 +1,7 @@
 "use client";
 
 import { CATEGORY_NAMES } from "@/lib/ai.config";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,6 +74,7 @@ interface Requirement {
   products_suggested_count: number;
   requirement_products: RequirementProduct[];
   mapped_products: MappedProduct[];
+  parent_requirement_id: string | null;
 }
 
 interface AssignedUser {
@@ -561,6 +562,126 @@ function ReassignSheet({
   );
 }
 
+// ─── Reopen Bottom Sheet ────────────────────────────────────────────────────
+
+function ReopenSheet({
+  requirementId,
+  userId,
+  onSuccess,
+  onClose,
+}: {
+  requirementId: string;
+  userId: number;
+  onSuccess: (newId: string) => void;
+  onClose: () => void;
+}) {
+  const [newDate, setNewDate] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    return d.toISOString().split("T")[0];
+  }, []);
+
+  async function confirmReopen() {
+    if (!newDate) {
+      setError("Please select a new deadline");
+      return;
+    }
+    const selected = new Date(newDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (selected < today) {
+      setError("Deadline must be today or in the future");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/requirements/${requirementId}/reopen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, newExpiryDate: newDate }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "Failed to reopen");
+      }
+      const json = await res.json();
+      onSuccess(json.data?.newRequirementId ?? "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-0">
+      <div className="bg-white rounded-t-2xl w-full max-w-md flex flex-col max-h-[75vh] shadow-xl relative">
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-gray-300" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-1 pb-3 shrink-0">
+          <h3 className="text-base font-bold text-gray-900">Re-Open Requirement</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-4 pb-6 min-h-0 flex flex-col gap-4">
+          <p className="text-sm text-gray-500">
+            This will create a new requirement with the same details. The original will stay closed.
+          </p>
+
+          {/* Date input */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-gray-700">New deadline</label>
+            <input
+              type="date"
+              value={newDate}
+              min={todayStr}
+              onChange={(e) => { setNewDate(e.target.value); setError(null); }}
+              className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              disabled={submitting}
+              className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmReopen}
+              disabled={submitting}
+              className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm font-medium transition-colors"
+            >
+              {submitting ? "Re-Opening…" : "Re-Open"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Category Edit Bottom Sheet ───────────────────────────────────────────────
 
 function CategoryEditSheet({
@@ -776,6 +897,7 @@ function CollapsibleOverview({
   userRole,
   onStatusChange,
   onReassign,
+  onReopen,
 }: {
   req: Requirement;
   assignedUser: AssignedUser | null;
@@ -784,6 +906,7 @@ function CollapsibleOverview({
   userRole: string;
   onStatusChange: (newStatus: string) => void;
   onReassign: () => void;
+  onReopen: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -795,6 +918,13 @@ function CollapsibleOverview({
     req.assigned_to_user_id === userId &&
     userRole === "bijnisBuyer" &&
     (req.status === "OPEN" || req.status === "IN_PROCESS");
+
+  // Show reopen button only if:
+  // - current user is the creator
+  // - requirement status is INCOMPLETE, CANNOT_BE_DONE, or AUTO_CLOSED
+  const canReopen =
+    req.created_by === userId &&
+    ["INCOMPLETE", "CANNOT_BE_DONE", "AUTO_CLOSED"].includes(req.status);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -820,9 +950,17 @@ function CollapsibleOverview({
         <DeadlineBadge expiry={req.expiry_date} />
       </div>
 
-      {/* Status update actions */}
-      <div className="px-4 pb-4">
+      {/* Status update actions + Reopen */}
+      <div className="px-4 pb-4 flex flex-col gap-2">
         <StatusUpdater req={req} userId={userId} onStatusChange={onStatusChange} />
+        {canReopen && (
+          <button
+            onClick={onReopen}
+            className="self-start px-3 py-1.5 rounded-xl text-xs font-semibold bg-green-600 hover:bg-green-700 text-white active:bg-green-800 transition-colors"
+          >
+            Re-Open
+          </button>
+        )}
       </div>
 
       {/* Expandable details */}
@@ -1650,6 +1788,7 @@ function DetailContent() {
   const [activeTab, setActiveTab]       = useState<"requirement" | "chat">(openChat ? "chat" : "requirement");
   const [showReassignSheet, setShowReassignSheet] = useState(false);
   const [showCategorySheet, setShowCategorySheet] = useState(false);
+  const [showReopenSheet, setShowReopenSheet]     = useState(false);
   const [toast, setToast]               = useState<string | null>(null);
 
   const fetchReq = useCallback(async () => {
@@ -1769,6 +1908,12 @@ function DetailContent() {
     setToast(`Category changed to ${newCategory}`);
   }
 
+  function handleReopenSuccess(newId: string) {
+    setShowReopenSheet(false);
+    setToast("Requirement Re-Opened");
+    router.push(`/requirements/${newId}?userId=${userId}`);
+  }
+
   if (loading) {
     return <DetailSkeleton />;
   }
@@ -1811,6 +1956,11 @@ function DetailContent() {
         <span className={`shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_COLORS[req.status] ?? "bg-gray-100 text-gray-600"}`}>
           {req.status.replace(/_/g, " ")}
         </span>
+        {req.parent_requirement_id && (
+          <span className="shrink-0 text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">
+            Re-Opened
+          </span>
+        )}
       </header>
 
       {/* Tab bar */}
@@ -1858,6 +2008,7 @@ function DetailContent() {
             userRole={userRole}
             onStatusChange={handleStatusChange}
             onReassign={() => setShowReassignSheet(true)}
+            onReopen={() => setShowReopenSheet(true)}
           />
 
           {/* Label & Category */}
@@ -2029,6 +2180,16 @@ function DetailContent() {
           userId={userId}
           onSuccess={handleCategoryChange}
           onClose={() => setShowCategorySheet(false)}
+        />
+      )}
+
+      {/* Reopen bottom sheet */}
+      {showReopenSheet && (
+        <ReopenSheet
+          requirementId={req.id}
+          userId={userId}
+          onSuccess={handleReopenSuccess}
+          onClose={() => setShowReopenSheet(false)}
         />
       )}
 
