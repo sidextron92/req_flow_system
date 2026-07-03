@@ -76,6 +76,25 @@ export async function PATCH(
     );
   }
 
+  // Enforce at least 1 mapped product when assignee moves to REVIEW_FOR_COMPLETION
+  if (newStatus === "REVIEW_FOR_COMPLETION" && assigneeAllowed) {
+    const { count, error: countError } = await supabaseAdmin
+      .from("mapped_products")
+      .select("id", { count: "exact", head: true })
+      .eq("requirementid", requirementId);
+
+    if (countError) {
+      return NextResponse.json({ error: countError.message }, { status: 500 });
+    }
+
+    if (!count || count === 0) {
+      return NextResponse.json(
+        { error: 'Please suggest atleast 1 product before updating the status to "Review For Completion".' },
+        { status: 400 }
+      );
+    }
+  }
+
   // Apply update — set updated_by so the DB trigger captures it for audit log
   const { error: updateError } = await supabaseAdmin
     .from("requirements")

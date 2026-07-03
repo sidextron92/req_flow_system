@@ -308,18 +308,56 @@ function StatusUpdateDialog({
   );
 }
 
+function MissingProductsDialog({
+  onSuggest,
+  onCancel,
+}: {
+  onSuggest: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 pb-6">
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 flex flex-col gap-4 shadow-xl">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-base font-bold text-gray-900">Cannot Update Status</h3>
+          <p className="text-sm text-gray-500">
+            Please suggest atleast 1 product before updating the status to &quot;Review For Completion&quot;.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSuggest}
+            className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+          >
+            Suggest Products
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatusUpdater({
   req,
   userId,
   onStatusChange,
+  onSuggestProducts,
 }: {
   req: Requirement;
   userId: number;
   onStatusChange: (newStatus: string) => void;
+  onSuggestProducts: () => void;
 }) {
   const [pending, setPending]   = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [error, setError]       = useState<string | null>(null);
+  const [showMissingProducts, setShowMissingProducts] = useState(false);
 
   const allowed = getAllowedTransitions(
     req.status,
@@ -341,6 +379,10 @@ function StatusUpdater({
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
+        if (json.error?.includes("Please suggest atleast 1 product")) {
+          setShowMissingProducts(true);
+          return;
+        }
         throw new Error(json.error ?? "Failed to update status");
       }
       onStatusChange(newStatus);
@@ -360,11 +402,19 @@ function StatusUpdater({
     return "px-3 py-1.5 rounded-xl text-xs font-semibold bg-green-600 hover:bg-green-700 text-white active:bg-green-800 transition-colors";
   }
 
+  function openTransitionDialog(s: string) {
+    if (s === "REVIEW_FOR_COMPLETION" && (!req.mapped_products || req.mapped_products.length === 0)) {
+      setShowMissingProducts(true);
+      return;
+    }
+    setPending(s);
+  }
+
   return (
     <>
       <div className="flex flex-wrap gap-2 pt-1">
         {allowed.map((s) => (
-          <button key={s} onClick={() => setPending(s)} className={btnClass(s)}>
+          <button key={s} onClick={() => openTransitionDialog(s)} className={btnClass(s)}>
             Mark as {STATUS_LABELS[s] ?? s}
           </button>
         ))}
@@ -378,6 +428,16 @@ function StatusUpdater({
           onConfirm={() => applyTransition(pending)}
           onCancel={() => { if (!updating) setPending(null); }}
           loading={updating}
+        />
+      )}
+
+      {showMissingProducts && (
+        <MissingProductsDialog
+          onSuggest={() => {
+            setShowMissingProducts(false);
+            onSuggestProducts();
+          }}
+          onCancel={() => setShowMissingProducts(false)}
         />
       )}
     </>
@@ -898,6 +958,7 @@ function CollapsibleOverview({
   onStatusChange,
   onReassign,
   onReopen,
+  onSuggestProducts,
 }: {
   req: Requirement;
   assignedUser: AssignedUser | null;
@@ -907,6 +968,7 @@ function CollapsibleOverview({
   onStatusChange: (newStatus: string) => void;
   onReassign: () => void;
   onReopen: () => void;
+  onSuggestProducts: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -952,7 +1014,7 @@ function CollapsibleOverview({
 
       {/* Status update actions + Reopen */}
       <div className="px-4 pb-4 flex flex-col gap-2">
-        <StatusUpdater req={req} userId={userId} onStatusChange={onStatusChange} />
+        <StatusUpdater req={req} userId={userId} onStatusChange={onStatusChange} onSuggestProducts={onSuggestProducts} />
         {canReopen && (
           <button
             onClick={onReopen}
@@ -2009,6 +2071,7 @@ function DetailContent() {
             onStatusChange={handleStatusChange}
             onReassign={() => setShowReassignSheet(true)}
             onReopen={() => setShowReopenSheet(true)}
+            onSuggestProducts={() => router.push(`/requirements/${req.id}/suggest-products?userId=${userId}`)}
           />
 
           {/* Label & Category */}
