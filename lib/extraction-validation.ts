@@ -19,13 +19,6 @@ const REQUIRED_BY_TYPE: Record<
   string,
   { key: string; label: string; check: (v: unknown) => boolean }[]
 > = {
-  RESTOCK: [
-    { key: "label_name",     label: "Brand / label name",  check: nonEmpty },
-    { key: "category_name",  label: "Product category",    check: nonEmpty },
-    { key: "expiry_date",    label: "Delivery deadline",   check: nonEmpty },
-    { key: "expected_price", label: "Expected price per unit (including tax)", check: isValidPrice },
-    { key: "products",       label: "At least one product with a valid name (Brand Name + Numeric Code, e.g. ASIAN 010)", check: hasProducts },
-  ],
   NEW_LABEL: [
     { key: "label_name",     label: "Brand / label name",              check: nonEmpty },
     { key: "category_name",  label: "Product category",                check: nonEmpty },
@@ -49,13 +42,6 @@ function isValidPrice(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   const num = Number(v);
   return !isNaN(num) && num >= 0;
-}
-
-function hasProducts(v: unknown): boolean {
-  return Array.isArray(v) && v.length > 0 &&
-    (v as Record<string, unknown>[]).some(
-      (p) => typeof p.product_name === "string" && p.product_name.trim() !== ""
-    );
 }
 
 export function validateExtraction(

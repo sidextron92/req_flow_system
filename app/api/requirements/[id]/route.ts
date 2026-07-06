@@ -130,20 +130,20 @@ interface PatchBody {
   products?: Product[];
   bijnis_buyer_id?: string | null;  // from fuzzy-match product result
   supply_tl_id?: string | null;     // from fuzzy-match brand result
-  extracted_data: Record<string, unknown>;  // full AI JSON to save
-  model_used: string;
+  extracted_data?: Record<string, unknown> | null;  // full AI JSON to save (optional for manual RESTOCK)
+  model_used?: string | null;
 }
 
 // ── Requirement type correction rule ──────────────────────────
-// product_id found → RESTOCK
-// label_id found (no product_id) → NEW_VARIETY
-// neither found → NEW_LABEL
+// RESTOCK is never auto-corrected (user explicitly selected it).
+// For NEW_LABEL / NEW_VARIETY:
+//   label_id found → NEW_VARIETY
+//   neither found → NEW_LABEL
 function resolveType(
-  products: Product[] | undefined,
+  currentType: RequirementType,
   label_id: string | null | undefined,
 ): RequirementType {
-  const hasProductId = products?.some((p) => p.product_id);
-  if (hasProductId) return "RESTOCK";
+  if (currentType === "RESTOCK") return "RESTOCK";
   if (label_id) return "NEW_VARIETY";
   return "NEW_LABEL";
 }
@@ -199,7 +199,7 @@ export async function PATCH(
   const assigneeId = await resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id, category_name);
 
   // ── 2. Correct requirement type based on catalog matches ───
-  const correctedType = resolveType(products, label_id);
+  const correctedType = resolveType(body.type ?? "NEW_LABEL", label_id);
 
   // ── 3. Update requirements row ─────────────────────────────
   const updatePayload: Record<string, unknown> = {
@@ -255,18 +255,20 @@ export async function PATCH(
     }
   }
 
-  // ── 4. Save ai_extractions ─────────────────────────────────
-  const { error: aiError } = await supabaseAdmin
-    .from("ai_extractions")
-    .insert({
-      requirement_id: requirementId,
-      extracted_data,
-      model_used,
-    });
+  // ── 4. Save ai_extractions (only if AI was used) ───────────
+  if (extracted_data && model_used) {
+    const { error: aiError } = await supabaseAdmin
+      .from("ai_extractions")
+      .insert({
+        requirement_id: requirementId,
+        extracted_data,
+        model_used,
+      });
 
-  if (aiError) {
-    console.error("Failed to save ai_extractions:", aiError.message);
-    // Non-fatal — requirement is already updated
+    if (aiError) {
+      console.error("Failed to save ai_extractions:", aiError.message);
+      // Non-fatal — requirement is already updated
+    }
   }
 
   // Notify newly assigned user

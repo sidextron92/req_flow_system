@@ -6,7 +6,9 @@ Darkstore requirement management app. Darkstore managers capture three types of 
 - **NEW_LABEL** — introduce a new brand/label
 - **NEW_VARIETY** — add new variants of an existing brand
 
-Core workflow: Manager fills a form (images + voice note + category) → AI extracts structured data → **category confidence check** (if < 70%, chat prompts user to confirm/correct category with AI-suggested pills) → chat loop fills any remaining gaps → fuzzy match against brand/product catalog → saved to DB as OPEN.
+Core workflow:
+- **NEW_LABEL / NEW_VARIETY** — Manager fills a form (images + voice note) → AI extracts structured data → **category confidence check** (if < 70%, chat prompts user to confirm/correct category with AI-suggested pills) → chat loop fills any remaining gaps → fuzzy match against brand/product catalog → saved to DB as OPEN.
+- **RESTOCK** — Manager selects label via fuzzy-search bottom sheet → selects products from that brand's catalog (2×2 image grid, multi-select) → picks expected delivery date → optionally adds remarks via voice note → **no AI extraction** → saved to DB as OPEN with assignment resolved from catalog IDs.
 
 ## Stack
 - **Next.js 16.2** App Router, TypeScript, Tailwind CSS v4
@@ -29,7 +31,7 @@ npm run lint   # ESLint
 |------|---------|
 | `app/page.tsx` | Home: requirement list + "New Requirement" CTA |
 | `app/requirements/[id]/page.tsx` | Detail: view/edit fields, comments, attachments |
-| `app/components/RequirementForm.tsx` | Modal: type select, image upload, voice record |
+| `app/components/RequirementForm.tsx` | Modal: type select, image upload, voice record. For RESTOCK: date picker, brand search bottom sheet, product selection bottom sheet (2×2 grid), remarks |
 | `app/components/ExtractionReview.tsx` | AI review: edit JSON, category confidence check (pills), chat to fill gaps, fuzzy match |
 | `lib/ai.config.ts` | Model choice + system prompts per requirement type; exports `CATEGORY_LIST` and `CATEGORY_NAMES` |
 | `lib/ai.service.ts` | Extraction logic (Anthropic + Gemini) |
@@ -68,7 +70,8 @@ npm run lint   # ESLint
 | `/api/transcribe` | POST | Deepgram: audio → Hindi transcript |
 | `/api/ai/fill-missing` | POST | AI fills missing fields from chat input; also supports `requestType: "category_suggestions"` to return top-5 ranked categories from `CATEGORY_LIST` |
 | `/api/ai/re-extract` | POST | Re-run extraction with edited system prompt |
-| `/api/brand-product/fuzzy-search` | POST | Trigram fuzzy search for brands/products |
+| `/api/brand-product/fuzzy-search` | POST | Trigram fuzzy search for brands/products; accepts optional `limit` param (default 5, max 20) |
+| `/api/brands/[brandId]/products` | GET | Returns all distinct products for a brand from `brand_product_data` (deduplicated by `product_name`) |
 | `/api/push/subscribe` | GET | Returns `{ subscribed, device_info, created_at }` for a userId |
 | `/api/push/subscribe` | POST | Upserts push subscription for a user (one per user — replaces existing) |
 | `/api/push/subscribe` | DELETE | Removes push subscription for a user |
@@ -79,7 +82,7 @@ npm run lint   # ESLint
 - **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
 - **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
-- **brand_product_data** — brand_name, brand_id, product_name, product_id. Has GiST trigram indexes for fuzzy search
+- **brand_product_data** — brand_name, brand_id, product_name, product_id, bijnis_buyer_id, bijnis_buyer_name, supply_tl_id, supply_tl_name, category_name, **image**, **article_code**. Has GiST trigram indexes for fuzzy search
 - **ai_extractions** — requirement_id FK, extracted_data JSONB, model_used
 - **status_update_log** — audit trail for status/assignment/field changes
 - **push_subscriptions** — `id UUID PK`, `user_id BIGINT UNIQUE FK users`, `endpoint TEXT`, `p256dh TEXT`, `auth TEXT`, `device_info TEXT` (e.g. "Chrome on Android"), `created_at`. One row per user — upserted on re-subscribe.
@@ -211,14 +214,36 @@ This section documents every step end-to-end. Reference a step number when descr
 
 ### Step 1 — Form capture (`RequirementForm.tsx` → `POST /api/requirements`)
 
-1.1 Manager selects requirement **type** (RESTOCK / NEW_LABEL / NEW_VARIETY) and **category**.
-1.2 Manager optionally uploads images and/or records a voice note (Deepgram transcribes Hindi in-browser via `POST /api/transcribe`; result is pasted into the Notes field).
-1.3 On submit, the client POSTs to `/api/requirements`:
-  - Creates a row in `requirements` with `status = DRAFT`.
-  - Uploads each image to Supabase Storage bucket (`reqflow_images`); stores `[{url, file_name, storage_path}]` in `attachments` JSONB.
-  - Runs AI extraction (see Step 2) and saves the result to `ai_extractions`.
-  - Returns `{ requirementId, extracted_data, model_used, aiError }` to the client.
-1.4 Client opens `ExtractionReview` modal with the returned extraction.
+#### 1.1 RESTOCK (manual flow — no AI extraction)
+1. Manager selects **"Restock"** type.
+2. Picks **Expected Delivery Date** via date input (sets `expiry_date`).
+3. Taps **"Select Label Name"** → opens `BrandSearchSheet` bottom sheet.
+   - Types brand name, taps **Search** → POSTs to `/api/brand-product/fuzzy-search` with `limit: 10`.
+   - Results show as a scrollable list; tapping a row selects the brand and closes the sheet.
+4. Once a brand is selected, **"Select Products"** CTA is enabled.
+   - Tapping it opens `ProductSelectionSheet` bottom sheet.
+   - Fetches `GET /api/brands/{brandId}/products` — deduplicated by `product_name`, includes `image`, `article_code`, `category_name`.
+   - Products render in a **2×2 card grid** with image, checkbox, product name, article code, and category.
+   - Multi-select via tap; selected cards show a green ring + checkmark.
+   - **Save** button at the bottom persists selections and closes the sheet.
+5. Selected products appear as removable pill tags below the CTA.
+6. Manager can optionally record a **voice note** — Deepgram transcribes Hindi and appends the transcript to the **Remarks** field (not Notes).
+7. On **Submit Requirement**, the client POSTs to `/api/requirements`:
+   - Creates a row in `requirements` with `status = DRAFT`.
+   - Sends `products` JSON array and `productImages` JSON map (first image per product).
+   - Server saves product image URLs to `attachments` JSONB with `storage_path: "product-image:{product_id}"`.
+   - Immediately calls `PATCH /api/requirements/[id]` to finalize assignment and set `status = OPEN`.
+   - No AI extraction. No `ExtractionReview` modal.
+
+#### 1.2 NEW_LABEL / NEW_VARIETY (AI extraction flow)
+1. Manager selects requirement **type** and **category**.
+2. Manager optionally uploads images and/or records a voice note (Deepgram transcribes Hindi in-browser via `POST /api/transcribe`; result is pasted into the **Notes** field).
+3. On submit, the client POSTs to `/api/requirements`:
+   - Creates a row in `requirements` with `status = DRAFT`.
+   - Uploads each image to Supabase Storage bucket (`reqflow_images`); stores `[{url, file_name, storage_path}]` in `attachments` JSONB.
+   - Runs AI extraction (see Step 2) and saves the result to `ai_extractions`.
+   - Returns `{ requirementId, extracted_data, model_used, aiError }` to the client.
+4. Client opens `ExtractionReview` modal with the returned extraction.
 
 ---
 
@@ -226,9 +251,9 @@ This section documents every step end-to-end. Reference a step number when descr
 
 2.1 Provider is set in `AI_CONFIG.provider` (`lib/ai.config.ts`) — currently `"anthropic"` (haiku). Switch to `"gemini"` there to change models.
 2.2 The system prompt is **type-specific** and built fresh each call (today's date is injected):
-  - **RESTOCK** — extracts `label_name`, `category_name`, `expiry_date`, `remarks`, `products[]` (each product must have format `"BrandName NumericCode"`, e.g. `"ASIAN 010"`).
   - **NEW_LABEL** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `remarks`, `products[]` (max 1 representative product).
   - **NEW_VARIETY** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `remarks`, `products[]` (multiple variants allowed).
+  - **RESTOCK** — no AI prompt. RESTOCK uses the manual flow (Step 1.1) without extraction.
 2.3 AI also returns `confidence{}` (per-field 0–1 score) and `extraction_notes` — `confidence` is used for the category check threshold; `extraction_notes` is hidden from the UI.
 2.4 AI must **never** output `label_id` or `product_id` — those are catalog IDs resolved only via fuzzy match (Step 4).
 2.5 The user can edit the system prompt in the UI and click **Re-run** to re-extract with the same images/notes.
@@ -254,9 +279,9 @@ The `categoryCheckDone` flag resets when **Re-run** is used, so a new extraction
 
 | Type | Required fields |
 |------|----------------|
-| RESTOCK | `label_name`, `category_name`, `expiry_date`, `products` (≥1 with a non-empty `product_name`) |
 | NEW_LABEL | `label_name`, `category_name`, `expiry_date`, `qty_required` |
 | NEW_VARIETY | `expiry_date`, `qty_required` |
+| RESTOCK | No AI validation — fields are captured manually in the form (Step 1.1) |
 
 3.2 If **valid** → skip to Step 4 (fuzzy match check).
 3.3 If **invalid** → chat view switches to "Confirm Details" mode (missing-fields sub-step). AI is given `currentExtraction` + `missingKeys` + the user's natural language reply → returns `updated_extraction` JSON.
@@ -347,6 +372,7 @@ The user-selected type is **overridden** based on catalog match results:
 
 | Condition | Corrected type |
 |-----------|----------------|
+| User selected `RESTOCK` | `RESTOCK` (never auto-corrected) |
 | Any product in `products[]` has a non-null `product_id` | `RESTOCK` |
 | No product match, but `label_id` is set | `NEW_VARIETY` |
 | Neither `product_id` nor `label_id` found | `NEW_LABEL` |
@@ -356,7 +382,7 @@ The corrected type is written to `requirements.type` in the UPDATE. The PATCH re
 #### 5.3 DB writes (in order)
 1. `UPDATE requirements` — sets all fields + `type` (corrected) + `status = OPEN` + `assigned_to_user_id` + `assigned_date`.
 2. `DELETE + INSERT requirement_products` — replaces all product rows for the requirement.
-3. `INSERT ai_extractions` — archives the full extracted JSON (non-fatal if this fails).
+3. `INSERT ai_extractions` — archives the full extracted JSON (non-fatal if this fails; **skipped for RESTOCK** since no AI extraction is run).
 
 ---
 
@@ -372,6 +398,9 @@ The corrected type is written to `requirements.type` in the UPDATE. The PATCH re
 | `bijnis_buyer_name` | TEXT | Buyer display name (informational) |
 | `supply_tl_id` | TEXT (numeric) | Supply TL user ID — used as `assigned_to_user_id` when only a brand match is found |
 | `supply_tl_name` | TEXT | Supply TL display name (informational) |
+| `category_name` | TEXT | Product category (auto-derived for RESTOCK from selected products) |
+| `image` | TEXT | Product image URL(s); comma-separated if multiple |
+| `article_code` | TEXT | Product article code for display |
 
 GiST trigram indexes: `idx_brand_trgm` on `brand_name`, `idx_product_trgm` on `product_name`.
 

@@ -9,6 +9,7 @@ interface FuzzySearchBody {
   label_name?: string;
   product_names?: string[];
   category_name?: string;
+  limit?: number;
 }
 
 interface BrandRow   { brand_name: string; brand_id: string; supply_tl_id: string | null; supply_tl_name: string | null; score: number }
@@ -28,7 +29,7 @@ interface ProductResult {
   suggestions: ProductMatch[];
 }
 
-const SUGGESTION_LIMIT = 5; // fetch 5, first may be exact → leaves 4 suggestions
+const DEFAULT_LIMIT = 5;
 
 export async function POST(req: NextRequest) {
   let body: FuzzySearchBody;
@@ -38,13 +39,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { label_name, product_names, category_name } = body;
+  const { label_name, product_names, category_name, limit } = body;
 
   if (!label_name && (!product_names || product_names.length === 0)) {
     return NextResponse.json({ error: "Provide label_name and/or product_names" }, { status: 400 });
   }
 
   const categoryFilter = category_name?.trim() || null;
+  const suggestionLimit = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), 20);
 
   // ── Label search ──────────────────────────────────────────────────────────
 
@@ -55,7 +57,7 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await supabaseAdmin.rpc("fuzzy_search_brands", {
       query,
-      result_limit: SUGGESTION_LIMIT,
+      result_limit: suggestionLimit,
     });
 
     if (error) {
@@ -98,7 +100,7 @@ export async function POST(req: NextRequest) {
         const query = name.trim();
         const { data, error } = await supabaseAdmin.rpc("fuzzy_search_products", {
           query,
-          result_limit: SUGGESTION_LIMIT,
+          result_limit: suggestionLimit,
           category_filter: categoryFilter,
         });
         return { query, rows: (data ?? []) as ProductRow[], error };

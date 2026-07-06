@@ -90,6 +90,25 @@ export async function POST(req: NextRequest) {
     attachments.push(result.attachment);
   }
 
+  // ── Attach product images (Restock manual flow) ────────────
+  const productImagesRaw = formData.get("productImages") as string | null;
+  if (productImagesRaw) {
+    try {
+      const productImages: Record<string, string> = JSON.parse(productImagesRaw);
+      for (const [productId, url] of Object.entries(productImages)) {
+        if (url) {
+          attachments.push({
+            url,
+            file_name: `Product ${productId}`,
+            storage_path: `product-image:${productId}`,
+          });
+        }
+      }
+    } catch {
+      // Ignore malformed productImages JSON
+    }
+  }
+
   // ── Upload voice note + transcribe ─────────────────────────
   const voiceNoteFile = formData.get("voiceNote") as File | null;
   let voiceStoragePath: string | null = null;

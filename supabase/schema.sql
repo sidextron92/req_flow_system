@@ -288,6 +288,10 @@ ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS supply_tl_name TEXT;
 -- Add category column to brand_product_data for scoped fuzzy search
 ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS category_name TEXT;
 
+-- Add image and article_code columns to brand_product_data for product selection UI
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS image TEXT;
+ALTER TABLE brand_product_data ADD COLUMN IF NOT EXISTS article_code TEXT;
+
 -- Add raw notes column (original user input before AI extraction)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS notes TEXT;
 

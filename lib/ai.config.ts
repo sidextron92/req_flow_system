@@ -52,48 +52,6 @@ function today(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// ── RESTOCK ───────────────────────────────────────────────────
-function buildRestockPrompt(currentDate: string): string {
-  return `You are an AI assistant that helps extract structured product requirement information from images and notes provided by darkstore managers.
-
-You will be given:
-- One or more product images (can be shelf photos, product labels, packaging, etc.)
-- Optional free-text notes from the manager
-
-Today's date is ${currentDate}.
-
-This is a RESTOCK requirement — the manager wants to reorder existing products that are running low or out of stock. Focus on identifying every product that needs restocking, with quantity and size/color details where visible.
-
-Your task is to extract as much information as possible and return it as a JSON object matching this schema:
-
-{
-  "label_name": string | null,        // Product/brand name visible on packaging or label (e.g. ASIAN, CAMPUS, BATA)
-  "category_name": string | null,     // Product category — pick exactly from: ${CATEGORY_LIST}
-  "expiry_date": string | null,       // Delivery deadline in ISO format YYYY-MM-DD. Resolve relative phrases in the notes (e.g. "within 3 days", "agle 10 din mein") by adding that many days to today (${currentDate}). If no deadline is mentioned, set to null.
-  "expected_price": number | null,    // Approximate price per unit including tax in INR. Convert text prices (e.g. "400 rupaye", "char sau") to digits.
-  "remarks": string | null,           // Notes + any additional observations or context relevant for the requirement
-  "products": [                       // All products that need restocking (can be multiple)
-    {
-      "product_name": string | null,  // MUST be Brand/Label Name + Numeric Code (e.g. "ASIAN 010", "Campus 2345"). If you cannot identify both a clear brand name AND a numeric code, set this to null — do not guess or partially fill.
-      "notes": string | null          // Per-product notes: size, color, quantity needed
-    }
-  ],
-  "confidence": {
-    "label_name": number,             // 0.0–1.0
-    "category_name": number,
-    "expiry_date": number,
-    "expected_price": number,
-    "products": number
-  },
-  "extraction_notes": string | null   // Caveats, ambiguities, or fields you could not extract
-}
-
-Rules:
-- If multiple products are visible, list them all in the products array.
-- For product_name: the value MUST follow the format "BrandName NumericCode" (e.g. "ASIAN 010", "Campus 2345", "Bata 1234"). Both parts — a recognisable brand name AND a numeric code — must be clearly visible or stated. If either part is missing or ambiguous, set product_name to null.
-${buildCommonRules(currentDate)}`;
-}
-
 // ── NEW LABEL ─────────────────────────────────────────────────
 function buildNewLabelPrompt(currentDate: string): string {
   return `You are an AI assistant that helps extract structured product requirement information from images and notes provided by darkstore managers.
@@ -184,7 +142,6 @@ ${buildCommonRules(currentDate)}`;
 
 // ── Builder map — keyed by DB enum value ─────────────────────
 const PROMPT_BUILDERS: Record<string, (date: string) => string> = {
-  RESTOCK:     buildRestockPrompt,
   NEW_LABEL:   buildNewLabelPrompt,
   NEW_VARIETY: buildNewVarietyPrompt,
 };
@@ -196,4 +153,4 @@ export function getSystemPrompt(requirementType: string): string {
 }
 
 // Legacy export so any remaining imports of DEFAULT_SYSTEM_PROMPT don't break.
-export const DEFAULT_SYSTEM_PROMPT = buildRestockPrompt(today());
+export const DEFAULT_SYSTEM_PROMPT = buildNewLabelPrompt(today());

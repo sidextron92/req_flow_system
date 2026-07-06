@@ -2126,7 +2126,7 @@ function DetailContent() {
                 )}
                 {req.remarks && (
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Remarks (AI Extracted)</span>
+                    <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Remarks</span>
                     <p className="text-sm text-gray-700 leading-relaxed">{req.remarks}</p>
                   </div>
                 )}
