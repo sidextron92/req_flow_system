@@ -535,30 +535,30 @@ export default function RequirementForm({
         {/* Scrollable form body */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-5 px-4 py-5 overflow-y-auto flex-1">
 
-          {/* Requirement Type */}
-          <div className="flex flex-col gap-1.5">
+          {/* Requirement Type — Pill Selector */}
+          <div className="flex flex-col gap-2">
             <label className="text-sm font-semibold text-gray-700">
               Requirement Type
             </label>
-            <div className="relative">
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                required
-                disabled={isSubmitting}
-                className="w-full appearance-none bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-60"
-              >
-                <option value="" disabled>Select a type...</option>
-                {REQUIREMENT_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <svg
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
+            <div className="flex gap-2">
+              {REQUIREMENT_TYPES.map((t) => {
+                const isSelected = type === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setType(isSelected ? "" : t)}
+                    disabled={isSubmitting}
+                    className={`flex-1 text-sm font-medium px-3 py-3 rounded-xl border transition-colors disabled:opacity-60 ${
+                      isSelected
+                        ? "bg-green-600 text-white border-green-600"
+                        : "bg-white text-gray-700 border-gray-200 hover:border-green-400 hover:text-green-600"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -765,7 +765,7 @@ export default function RequirementForm({
           )}
 
           {/* Voice Note */}
-          {micSupported && (
+          {micSupported && type !== "" && (
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-semibold text-gray-700">
                 Voice Note
