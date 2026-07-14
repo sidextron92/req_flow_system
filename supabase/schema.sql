@@ -23,7 +23,8 @@ CREATE TYPE requirement_status AS ENUM (
   'INCOMPLETE',
   'PARTIALLY_COMPLETE',
   'CANNOT_BE_DONE',
-  'AUTO_CLOSED'
+  'AUTO_CLOSED',
+  'AUTO_COMPLETED'
 );
 
 CREATE TYPE status_change_type AS ENUM (
@@ -449,6 +450,14 @@ BEGIN
   ) THEN
     ALTER TYPE requirement_status ADD VALUE 'AUTO_CLOSED';
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_enum
+    WHERE enumlabel = 'AUTO_COMPLETED'
+    AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'requirement_status')
+  ) THEN
+    ALTER TYPE requirement_status ADD VALUE 'AUTO_COMPLETED';
+  END IF;
 END $$;
 
 
@@ -486,4 +495,55 @@ SELECT cron.schedule(
   'auto-close-stale-requirements',
   '0 2 * * *',
   'SELECT auto_close_stale_requirements()'
+);
+
+
+-- ============================================================
+-- AUTO-COMPLETE REVIEW REQUIREMENTS (pg_cron)
+-- ============================================================
+
+-- Function: auto-complete requirements that have been in REVIEW_FOR_COMPLETION for 10+ days
+CREATE OR REPLACE FUNCTION auto_complete_review_requirements()
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  rec RECORD;
+BEGIN
+  FOR rec IN
+    SELECT r.id, r.comment_log
+    FROM requirements r
+    INNER JOIN LATERAL (
+      SELECT changed_at
+      FROM status_update_log
+      WHERE requirement_id = r.id
+        AND change_type = 'STATUS_CHANGE'
+        AND new_value = 'REVIEW_FOR_COMPLETION'
+      ORDER BY changed_at DESC
+      LIMIT 1
+    ) sul ON true
+    WHERE r.status = 'REVIEW_FOR_COMPLETION'
+      AND sul.changed_at < NOW() - INTERVAL '10 days'
+  LOOP
+    UPDATE requirements
+    SET status = 'AUTO_COMPLETED',
+        updated_by = NULL,
+        comment_log = COALESCE(comment_log, '[]'::JSONB) || jsonb_build_array(
+          jsonb_build_object(
+            'userId', 0,
+            'name', 'System',
+            'comment', 'Automatically completed after 10 days in Review for Completion with no action.',
+            'date', NOW()
+          )
+        )
+    WHERE id = rec.id;
+  END LOOP;
+END;
+$$;
+
+-- Schedule: run every day at 02:00 UTC
+SELECT cron.schedule(
+  'auto-complete-review-requirements',
+  '0 2 * * *',
+  'SELECT auto_complete_review_requirements()'
 );

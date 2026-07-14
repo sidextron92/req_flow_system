@@ -26,6 +26,15 @@ const ASSIGNEE_TRANSITIONS: AllowedTransition = {
   CANNOT_BE_DONE: ["IN_PROCESS"],
 };
 
+const TERMINAL_STATUSES = new Set([
+  "COMPLETED",
+  "PARTIALLY_COMPLETE",
+  "INCOMPLETE",
+  "CANNOT_BE_DONE",
+  "AUTO_CLOSED",
+  "AUTO_COMPLETED",
+]);
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -62,6 +71,15 @@ export async function PATCH(
   }
 
   const currentStatus: string = req_data.status;
+
+  // Terminal statuses cannot be changed
+  if (TERMINAL_STATUSES.has(currentStatus)) {
+    return NextResponse.json(
+      { error: `Status ${currentStatus} is terminal and cannot be changed` },
+      { status: 403 }
+    );
+  }
+
   const isCreator  = req_data.created_by === userIdNum;
   const isAssignee = req_data.assigned_to_user_id === userIdNum;
 

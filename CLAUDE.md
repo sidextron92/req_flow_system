@@ -47,8 +47,10 @@ npm run lint   # ESLint
 | `app/api/trading-products/route.ts` | POST — Proxies to Bijnis trading API (`/g/ss/retool/trading/trading-session-rm-variant-list`) with `Token-X` auth; returns `{ data: products[], resultCount }` |
 | `app/api/requirements/[id]/suggest-products/route.ts` | POST — Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
 | `app/requirements/[id]/suggest-products/page.tsx` | Suggest Products page — trading product grid with search, pagination, selection, sticky CTA |
-| `app/api/requirements/[id]/reopen/route.ts` | POST — Creator reopens a closed requirement (`INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`). Clones the row, copies products + attachments, asks for new `expiry_date`, re-runs assignment, and starts at `OPEN` |
+| `app/api/requirements/[id]/reopen/route.ts` | POST — Creator reopens a closed requirement (`INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`). `AUTO_COMPLETED` is **not** reopenable. Clones the row, copies products + attachments, asks for new `expiry_date`, re-runs assignment, and starts at `OPEN` |
 | `app/requirements/[id]/page.tsx` | `ReopenSheet` bottom-sheet component; `Re-Opened` badge on header when `parent_requirement_id` is set |
+| `vercel.json` | Cron schedule config — daily at 02:00 UTC → `/api/cron/auto-complete` |
+| `app/api/cron/auto-complete/route.ts` | Daily cron — finds requirements that transitioned to `AUTO_COMPLETED` in last 25h and sends push notification to creator |
 
 ## API routes
 | Route | Method | What it does |
@@ -75,11 +77,12 @@ npm run lint   # ESLint
 | `/api/push/subscribe` | GET | Returns `{ subscribed, device_info, created_at }` for a userId |
 | `/api/push/subscribe` | POST | Upserts push subscription for a user (one per user — replaces existing) |
 | `/api/push/subscribe` | DELETE | Removes push subscription for a user |
+| `/api/cron/auto-complete` | GET | Protected by `CRON_SECRET`. Finds `AUTO_COMPLETED` transitions in last 25h and sends push to creators |
 
 ## DB schema (key tables)
 - **users** — `id BIGINT PK`, name, role, phone, darkstore_id, darkstore_name
 - **categories** — `id UUID PK`, name
-- **requirements** — `id UUID PK`, type (enum), status (default DRAFT), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
+- **requirements** — `id UUID PK`, type (enum), status (default DRAFT, includes `AUTO_COMPLETED`), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
 - **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
 - **brand_product_data** — brand_name, brand_id, product_name, product_id, bijnis_buyer_id, bijnis_buyer_name, supply_tl_id, supply_tl_name, category_name, **image**, **article_code**. Has GiST trigram indexes for fuzzy search
@@ -177,6 +180,7 @@ Generated once via `npx web-push generate-vapid-keys`. Public key is `NEXT_PUBLI
 | Status change | `app/api/requirements/[id]/status/route.ts` | Creator (when assignee acts) or Assignee (when creator acts) |
 | Reassignment | `app/api/requirements/[id]/assign/route.ts` | New assignee |
 | Products suggested | `app/api/requirements/[id]/suggest-products/route.ts` | Creator |
+| Auto completed | `app/api/cron/auto-complete/route.ts` | Creator (daily cron for requirements that transitioned to `AUTO_COMPLETED` in last 25h) |
 
 All notifications are fire-and-forget (IIFE async) — failures never affect the API response.
 
@@ -421,12 +425,13 @@ GiST trigram indexes: `idx_brand_trgm` on `brand_name`, `idx_product_trgm` on `p
 | `INCOMPLETE` | Creator rejected the work |
 | `CANNOT_BE_DONE` | Assignee marked as impossible |
 | `AUTO_CLOSED` | Auto-closed by system after 30 days of inactivity |
+| `AUTO_COMPLETED` | Auto-completed by system after 10 days in Review for Completion with no creator action |
 
 `DRAFT → OPEN` is automatic (happens during extraction finalization in Step 5 — not user-initiated).
 
 #### 6.2b Re-Open transition (creator-only, not a state transition)
 
-A creator can **re-open** a closed requirement from `INCOMPLETE`, `CANNOT_BE_DONE`, or `AUTO_CLOSED`. This is **not** a status transition on the original row — it creates a **clone** (see Step 6.5).
+A creator can **re-open** a closed requirement from `INCOMPLETE`, `CANNOT_BE_DONE`, or `AUTO_CLOSED`. `AUTO_COMPLETED` is **not** reopenable. This is **not** a status transition on the original row — it creates a **clone** (see Step 6.5).
 
 #### 6.2 Role-based transition rules
 
@@ -449,7 +454,7 @@ A user must be the **creator** (`created_by = userId`) or the **assignee** (`ass
 | IN_PROCESS | REVIEW_FOR_COMPLETION |
 | IN_PROCESS | CANNOT_BE_DONE |
 
-Terminal states (no further transitions): `COMPLETED`, `PARTIALLY_COMPLETE`, `INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`.
+Terminal states (no further transitions): `COMPLETED`, `PARTIALLY_COMPLETE`, `INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`, `AUTO_COMPLETED`.
 
 **Full transition diagram:**
 ```
@@ -461,10 +466,10 @@ DRAFT ──(auto)──► OPEN
                    ▼                      INCOMPLETE ───┐
         REVIEW_FOR_COMPLETION  AUTO_CLOSED ────────────┼──► Re-Open (clone)
                    │ (creator)          CANNOT_BE_DONE ─┘
-          ┌────────┼────────┐
-          ▼        ▼        ▼
-      COMPLETED  PARTIALLY  INCOMPLETE
-                 _COMPLETE
+           ┌───────┼───────┐         AUTO_COMPLETED (terminal, no re-open)
+           ▼       ▼       ▼
+       COMPLETED  PARTIALLY  INCOMPLETE
+                  _COMPLETE
 ```
 
 #### 6.3 API contract (`PATCH /api/requirements/[id]/status`)
@@ -586,7 +591,7 @@ Filter state is a `FilterKey` string (not a raw status value). Filtering logic l
 |--------|-------|-----------------|
 | `all_open` | All Open | DRAFT, OPEN, IN_PROCESS, REVIEW_FOR_COMPLETION |
 | `action_pending` | Action Pending | REVIEW_FOR_COMPLETION always; plus OPEN/IN_PROCESS only when `comment_log` is non-empty and the last comment's `userId ≠ currentUserId` |
-| `closed` | Closed | COMPLETED, INCOMPLETE, PARTIALLY_COMPLETE, CANNOT_BE_DONE |
+| `closed` | Closed | COMPLETED, INCOMPLETE, PARTIALLY_COMPLETE, CANNOT_BE_DONE, AUTO_CLOSED, AUTO_COMPLETED |
 
 **Action Pending detail:** For OPEN/IN_PROCESS requirements, the condition is: at least one comment exists AND the last entry in `comment_log[]` has `userId !== currentUserId`. Requirements with an empty `comment_log` are excluded from this filter even if their status is OPEN or IN_PROCESS.
 
@@ -596,7 +601,7 @@ Filter state is a `FilterKey` string (not a raw status value). Filtering logic l
 |--------|-------|---------|
 | `all_open` | All Open | OPEN, IN_PROCESS |
 | `follow_up` | Follow Up | REVIEW_FOR_COMPLETION (assignee tracking items they've submitted, awaiting creator closure) |
-| `closed` | Closed | COMPLETED, INCOMPLETE, PARTIALLY_COMPLETE, CANNOT_BE_DONE |
+| `closed` | Closed | COMPLETED, AUTO_CLOSED, AUTO_COMPLETED |
 
 #### 8.3 Data requirements
 - Both `GET /api/requirements` (byMe) and `GET /api/requirements/assigned` (forMe) now return `comment_log` in the select.
@@ -647,6 +652,50 @@ Sticky bottom button **"Suggest X Products"** appears when `selectedMap.size > 0
 
 #### 9.6 Display on detail page
 A collapsible **"Suggested Products (X)"** section appears below Attachments on the requirement detail page, showing the same 2-column grid with image, name, color, landing price, and available stock pill. The home page requirement card shows a blue **"X suggested"** pill badge when `products_suggested_count > 0`.
+
+---
+
+### Step 10 — Auto-Complete Cron (`pg_cron` + Vercel Cron)
+
+#### 10.1 Overview
+Requirements that sit in `REVIEW_FOR_COMPLETION` for more than 10 days without any creator action are automatically moved to `AUTO_COMPLETED` by a **pg_cron** DB function. A companion **Vercel cron** sends push notifications to creators so they are aware of the closure.
+
+#### 10.2 DB function (`auto_complete_review_requirements`)
+Scheduled via `pg_cron` to run daily at **02:00 UTC**.
+
+Logic:
+1. Find all requirements with `status = 'REVIEW_FOR_COMPLETION'`.
+2. For each, look up the **latest** `status_update_log` entry where `new_value = 'REVIEW_FOR_COMPLETION'`.
+3. If that entry's `changed_at` is older than 10 days:
+   - Update `requirements.status` to `AUTO_COMPLETED`.
+   - Set `updated_by = NULL` (system action).
+   - Append a system comment to `comment_log`: *"Automatically completed after 10 days in Review for Completion with no action."*
+   - The existing `log_requirement_changes()` trigger automatically writes a `STATUS_CHANGE` row to `status_update_log`.
+
+#### 10.3 Push notification cron (`/api/cron/auto-complete`)
+Scheduled via `vercel.json` to run daily at **02:00 UTC**.
+
+Logic:
+1. Query `status_update_log` for rows where `change_type = 'STATUS_CHANGE'`, `new_value = 'AUTO_COMPLETED'`, and `changed_at` is within the last 25 hours.
+2. For each matching requirement, send a push notification to the creator:
+   - Title: *"Requirement Auto Completed"*
+   - Body: *"Your requirement 'Label Name' was automatically completed after 10 days with no action."*
+   - Deep link: `/requirements/{id}?userId={creatorId}`
+3. Protected by `Authorization: Bearer {CRON_SECRET}` header.
+
+#### 10.4 Terminal status behaviour
+`AUTO_COMPLETED` is a **terminal status**:
+- No status transitions are allowed out of it (enforced by `TERMINAL_STATUSES` guard in `PATCH /api/requirements/[id]/status`).
+- Re-open is **not** allowed (`REOPENABLE_STATUSES` excludes `AUTO_COMPLETED`).
+- The requirement appears in the **Closed** filter on both home-page tabs.
+
+#### 10.5 Key files
+| File | Role |
+|------|------|
+| `supabase/schema.sql` | `auto_complete_review_requirements()` function + `pg_cron` schedule |
+| `vercel.json` | Vercel cron schedule config |
+| `app/api/cron/auto-complete/route.ts` | Push notification sender for auto-completed requirements |
+| `app/api/requirements/[id]/status/route.ts` | `TERMINAL_STATUSES` guard blocks any transition from `AUTO_COMPLETED` |
 
 ---
 
