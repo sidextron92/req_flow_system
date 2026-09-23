@@ -1,5 +1,6 @@
 "use client";
 
+import { getTradingWindowText } from "@/lib/trading-window";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
@@ -18,6 +19,7 @@ interface TradingProduct {
   margin: number | null;
   remainingLotInfo: { text: string; textColor: string } | null;
   skPrice: number;
+  stockBlockingLiveOn?: string;
   title: string;
   imageUrl: string;
 }
@@ -33,6 +35,7 @@ interface MappedProduct {
   article_code: string | null;
   colorname: string | null;
   availablestock: string | null;
+  stock_blocking_live_on: string | null;
 }
 
 interface Requirement {
@@ -72,6 +75,8 @@ function parseTradingProducts(raw: unknown[]): TradingProduct[] {
         ? (r.remainingLotInfo as { text: string; textColor: string })
         : null,
       skPrice: Number(r.skPrice ?? 0),
+      stockBlockingLiveOn:
+        typeof r.stockBlockingLiveOn === "string" ? r.stockBlockingLiveOn : undefined,
       title: String(r.title ?? ""),
       imageUrl: String(r.imageUrl ?? ""),
     };
@@ -160,6 +165,10 @@ function ProductCard({
             {product.remainingLotInfo.text}
           </span>
         )}
+
+        <p className="text-xs text-gray-500">
+          {getTradingWindowText(product.stockBlockingLiveOn)}
+        </p>
       </div>
     </div>
   );
@@ -204,6 +213,10 @@ function SelectedProductCard({
             {product.remainingLotInfo.text}
           </span>
         )}
+
+        <p className="text-xs text-gray-500">
+          {getTradingWindowText(product.stockBlockingLiveOn)}
+        </p>
       </div>
     </div>
   );
@@ -226,6 +239,7 @@ function mappedToTrading(mp: MappedProduct): TradingProduct {
       ? { text: mp.availablestock, textColor: "#2EC885" }
       : null,
     skPrice: mp.landingprice ?? 0,
+    stockBlockingLiveOn: mp.stock_blocking_live_on ?? undefined,
     title: mp.productname ?? "Product",
     imageUrl: mp.image_url ?? "",
   };
@@ -394,6 +408,7 @@ function SuggestProductsContent() {
         colorName: p.colorDetails[0]?.colorName ?? null,
         colorQty: p.colorDetails[0]?.colorQty ?? null,
         availableStock: p.remainingLotInfo?.text ?? null,
+        stockBlockingLiveOn: p.stockBlockingLiveOn ?? null,
         mrp: p.mrp,
         margin: p.margin,
       }));

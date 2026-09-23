@@ -3,9 +3,10 @@
 // Body: { userId: number, categoryName: string, query?: string, start?: number, size?: number }
 
 import { NextRequest, NextResponse } from "next/server";
+import { parseStockBlockingLiveOn } from "@/lib/trading-window";
 
 const TRADING_API_URL =
-  "https://api.bijnis.com/g/ss/retool/trading/trading-session-rm-variant-list";
+  "https://api.bijnis.com/g/ss/retool/trading/trading-session-rm-variant-list-v2";
 
 export async function POST(req: NextRequest) {
   let body: {
@@ -73,8 +74,20 @@ export async function POST(req: NextRequest) {
     }
 
     const raw = await res.json();
-    const products = Array.isArray(raw?.payload) ? raw.payload : [];
-    const resultCount = typeof raw?.resultCount === "number" ? raw.resultCount : null;
+    const rawProducts = Array.isArray(raw?.payload) ? raw.payload : [];
+    const resultCount =
+      typeof raw?.resultCount === "number" ? raw.resultCount : null;
+
+    // Normalize stockBlockingLiveOn into an ISO timestamp for downstream use.
+    const products = rawProducts.map((p: Record<string, unknown>) => {
+      const parsed = parseStockBlockingLiveOn(
+        typeof p.stockBlockingLiveOn === "string" ? p.stockBlockingLiveOn : null
+      );
+      return {
+        ...p,
+        stockBlockingLiveOn: parsed ? parsed.toISOString() : null,
+      };
+    });
 
     return NextResponse.json({ data: products, resultCount });
   } catch (err) {

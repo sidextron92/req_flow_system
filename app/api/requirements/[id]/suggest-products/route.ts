@@ -17,6 +17,7 @@ interface TradingProduct {
   colorName: string | null;
   colorQty: number | null;
   availableStock: string | null;
+  stockBlockingLiveOn?: string | null;
   mrp: number | null;
   margin: number | null;
 }
@@ -81,6 +82,7 @@ export async function POST(
           colorname: p.colorName
             ? `${p.colorName}${p.colorQty != null ? ` (${p.colorQty})` : ""}`
             : null,
+          stock_blocking_live_on: p.stockBlockingLiveOn ?? null,
           createdby: userId,
           updatedat: now,
         },

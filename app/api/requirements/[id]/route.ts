@@ -34,7 +34,7 @@ export async function GET(
       .order("changed_at", { ascending: true }),
     supabaseAdmin
       .from("mapped_products")
-      .select("id, productid, brandid, productname, variantid, landingprice, image_url, article_code, colorname, availablestock, createdby, createdat, updatedat")
+      .select("id, productid, brandid, productname, variantid, landingprice, image_url, article_code, colorname, availablestock, stock_blocking_live_on, createdby, createdat, updatedat")
       .eq("requirementid", id)
       .order("updatedat", { ascending: false }),
   ]);

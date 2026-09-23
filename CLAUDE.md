@@ -44,7 +44,7 @@ npm run lint   # ESLint
 | `app/settings/page.tsx` | Settings page at `/settings?userId=<id>` — shows subscription status, device info, resubscribe |
 | `worker/index.js` | Service worker push handler + notificationclick deep-link opener — compiled by next-pwa and injected via `importScripts` into `sw.js` |
 | `app/api/upload/chat/route.ts` | Multipart file upload endpoint → `reqflow_attachments` Supabase bucket; validates type + 5 MB; returns public URL |
-| `app/api/trading-products/route.ts` | POST — Proxies to Bijnis trading API (`/g/ss/retool/trading/trading-session-rm-variant-list`) with `Token-X` auth; returns `{ data: products[], resultCount }` |
+| `app/api/trading-products/route.ts` | POST — Proxies to Bijnis trading API v2 (`/g/ss/retool/trading/trading-session-rm-variant-list-v2`) with `Token-X` auth; parses `stockBlockingLiveOn` into an ISO timestamp; returns `{ data: products[], resultCount }` |
 | `app/api/requirements/[id]/suggest-products/route.ts` | POST — Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
 | `app/requirements/[id]/suggest-products/page.tsx` | Suggest Products page — trading product grid with search, pagination, selection, sticky CTA |
 | `app/api/requirements/[id]/reopen/route.ts` | POST — Creator reopens a closed requirement (`INCOMPLETE`, `CANNOT_BE_DONE`, `AUTO_CLOSED`). `AUTO_COMPLETED` is **not** reopenable. Clones the row, copies products + attachments, asks for new `expiry_date`, re-runs assignment, and starts at `OPEN` |
@@ -65,7 +65,7 @@ npm run lint   # ESLint
 | `/api/requirements/[id]/assign` | PATCH | Reassign to a different bijnisBuyer; only current assignee (role=bijnisBuyer) can call; status must be OPEN or IN_PROCESS; ASSIGNMENT_CHANGE written via DB trigger; assigned_date unchanged |
 | `/api/requirements/[id]/comment` | POST | Append to comment_log JSONB array; accepts optional `attachments: string[]` of Supabase public URLs; comment text is optional if attachments are present |
 | `/api/requirements/[id]/suggest-products` | POST | Upserts selected trading products into `mapped_products`; recalculates `products_suggested_count`; notifies creator via push |
-| `/api/trading-products` | POST | Proxies to Bijnis trading API (`/g/ss/retool/trading/trading-session-rm-variant-list`) with `Token-X` auth; returns `{ data: products[], resultCount }` |
+| `/api/trading-products` | POST | Proxies to Bijnis trading API v2 (`/g/ss/retool/trading/trading-session-rm-variant-list-v2`) with `Token-X` auth; parses `stockBlockingLiveOn` into an ISO timestamp; returns `{ data: products[], resultCount }` |
 | `/api/upload/chat` | POST | Upload a single file (multipart) to `reqflow_attachments` bucket; validates type + 5 MB limit; returns `{ url }` |
 | `/api/user` | GET | User info from users table |
 | `/api/users/bijnisBuyers` | GET | All users with role='bijnisBuyer' (id, name, phone); used by reassign bottom sheet |
@@ -84,7 +84,7 @@ npm run lint   # ESLint
 - **categories** — `id UUID PK`, name
 - **requirements** — `id UUID PK`, type (enum), status (default DRAFT, includes `AUTO_COMPLETED`), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
-- **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
+- **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, `stock_blocking_live_on TIMESTAMPTZ`, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
 - **brand_product_data** — brand_name, brand_id, product_name, product_id, bijnis_buyer_id, bijnis_buyer_name, supply_tl_id, supply_tl_name, category_name, **image**, **article_code**. Has GiST trigram indexes for fuzzy search
 - **ai_extractions** — requirement_id FK, extracted_data JSONB, model_used
 - **status_update_log** — audit trail for status/assignment/field changes
@@ -627,7 +627,7 @@ On mount the page loads the requirement to get `category_name` and `created_by`,
 - `query = search phrase` (optional)
 - `start`, `size = 20`
 
-The proxy calls `https://api.bijnis.com/g/ss/retool/trading/trading-session-rm-variant-list` with `Token-X` header and returns `payload` array + `resultCount`.
+The proxy calls `https://api.bijnis.com/g/ss/retool/trading/trading-session-rm-variant-list-v2` with `Token-X` header, parses `stockBlockingLiveOn` into an ISO timestamp, and returns `payload` array + `resultCount`.
 
 #### 9.3 Product grid
 - Two-column grid cards showing: image, checkbox, product name, color name, landing price, MRP, margin, remaining lots pill
@@ -651,7 +651,13 @@ Sticky bottom button **"Suggest X Products"** appears when `selectedMap.size > 0
 3. Sends push notification to creator: `"X products mapped for your requirement of $label_name$"`
 
 #### 9.6 Display on detail page
-A collapsible **"Suggested Products (X)"** section appears below Attachments on the requirement detail page, showing the same 2-column grid with image, name, color, landing price, and available stock pill. The home page requirement card shows a blue **"X suggested"** pill badge when `products_suggested_count > 0`.
+A collapsible **"Suggested Products (X)"** section appears below Attachments on the requirement detail page, showing the same 2-column grid with image, name, color, landing price, available stock pill, and **Trading window** text. The trading window is rendered relative to the current date from the stored `stock_blocking_live_on` value. The text is label-free and omits the current year to stay compact:
+- Same day → `Live today`
+- Future, 1 day away → `Starts tomorrow`
+- Future, >1 day away → `Starts 24 Sep`
+- Past → `Started 21 Sep`
+
+The home page requirement card shows a blue **"X suggested"** pill badge when `products_suggested_count > 0`.
 
 ---
 

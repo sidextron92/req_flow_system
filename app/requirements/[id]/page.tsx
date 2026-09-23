@@ -1,6 +1,7 @@
 "use client";
 
 import { CATEGORY_NAMES } from "@/lib/ai.config";
+import { getTradingWindowText } from "@/lib/trading-window";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
@@ -46,6 +47,7 @@ interface MappedProduct {
   article_code: string | null;
   colorname: string | null;
   availablestock: string | null;
+  stock_blocking_live_on: string | null;
   createdby: number | null;
   createdat: string;
   updatedat: string;
@@ -2192,6 +2194,9 @@ function DetailContent() {
                       {p.availablestock && (
                         <span className="self-start text-xs font-semibold text-white bg-green-600 px-2 py-0.5 rounded-full">{p.availablestock}</span>
                       )}
+                      <p className="text-xs text-gray-500">
+                        {getTradingWindowText(p.stock_blocking_live_on)}
+                      </p>
                     </div>
                   </div>
                 ))}

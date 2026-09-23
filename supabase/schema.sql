@@ -313,24 +313,29 @@ CREATE TRIGGER log_requirement_changes_trigger
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS products_suggested_count INT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS mapped_products (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  productid        TEXT NOT NULL,
-  requirementid    UUID NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
-  brandid          TEXT,
-  productname      TEXT,
-  variantid        TEXT NOT NULL,
-  landingprice     NUMERIC(10,2),
-  image_url        TEXT,
-  article_code     TEXT,
-  gender           TEXT,
-  availablestock   TEXT,
-  colorname        TEXT,
-  createdby        BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  createdat        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updatedat        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  productid               TEXT NOT NULL,
+  requirementid           UUID NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+  brandid                 TEXT,
+  productname             TEXT,
+  variantid               TEXT NOT NULL,
+  landingprice            NUMERIC(10,2),
+  image_url               TEXT,
+  article_code            TEXT,
+  gender                  TEXT,
+  availablestock          TEXT,
+  colorname               TEXT,
+  stock_blocking_live_on  TIMESTAMPTZ,
+  createdby               BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  createdat               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updatedat               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Migration-safe addition for existing databases
+ALTER TABLE mapped_products ADD COLUMN IF NOT EXISTS stock_blocking_live_on TIMESTAMPTZ;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mapped_products_req_variant ON mapped_products(requirementid, variantid);
+CREATE INDEX IF NOT EXISTS idx_mapped_products_stock_blocking ON mapped_products(stock_blocking_live_on);
 CREATE INDEX IF NOT EXISTS idx_mapped_products_requirementid ON mapped_products(requirementid);
 CREATE INDEX IF NOT EXISTS idx_mapped_products_updatedat ON mapped_products(updatedat DESC);
 
