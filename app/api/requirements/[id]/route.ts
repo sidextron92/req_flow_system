@@ -16,7 +16,7 @@ export async function GET(
       .from("requirements")
       .select(`
         id, type, status,
-        label_name, label_id,
+        label_name, label_id, is_generic, parent_requirement_id,
         category_id, category_name,
         expiry_date, notes, remarks, qty_required, expected_price,
         attachments, comment_log,
@@ -122,6 +122,7 @@ interface PatchBody {
   type?: RequirementType | null;    // user-selected type (may be corrected server-side)
   label_name?: string | null;
   label_id?: string | null;
+  is_generic?: boolean;
   category_name?: string | null;
   expiry_date?: string | null;
   qty_required?: string | null;
@@ -142,8 +143,10 @@ interface PatchBody {
 function resolveType(
   currentType: RequirementType,
   label_id: string | null | undefined,
+  isGeneric: boolean,
 ): RequirementType {
   if (currentType === "RESTOCK") return "RESTOCK";
+  if (isGeneric) return "NEW_VARIETY";
   if (label_id) return "NEW_VARIETY";
   return "NEW_LABEL";
 }
@@ -160,7 +163,18 @@ async function resolveAssignee(
   bijnis_buyer_id: string | null | undefined,
   supply_tl_id: string | null | undefined,
   category_name: string | null | undefined,
+  isGeneric: boolean,
 ): Promise<number | null> {
+  if (isGeneric) {
+    if (!category_name) return null;
+    const { data } = await supabaseAdmin
+      .from("category_buyer_defaults")
+      .select("user_id")
+      .eq("category_name", category_name)
+      .single();
+    return data?.user_id ? Number(data.user_id) : null;
+  }
+
   const hasProductId = products?.some((p) => p.product_id);
   if (hasProductId && bijnis_buyer_id && !Number.isNaN(Number(bijnis_buyer_id))) {
     return Number(bijnis_buyer_id);
@@ -193,22 +207,75 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from("requirements")
+    .select("type, is_generic, label_name, label_id, category_name, expiry_date, qty_required, expected_price")
+    .eq("id", requirementId)
+    .single();
+
+  if (existingError || !existing) {
+    const status = existingError?.code === "PGRST116" ? 404 : 500;
+    return NextResponse.json({ error: existingError?.message ?? "Requirement not found" }, { status });
+  }
+
   const { userId, label_name, label_id, category_name, expiry_date, qty_required, expected_price, remarks, products, bijnis_buyer_id, supply_tl_id, extracted_data, model_used } = body;
+  const requestedType = existing.type as RequirementType;
+  const isGeneric = existing.is_generic ?? false;
+
+  if (!(["RESTOCK", "NEW_LABEL", "NEW_VARIETY"] as string[]).includes(requestedType)) {
+    return NextResponse.json({ error: "Invalid requirement type" }, { status: 400 });
+  }
+  if (body.type != null && body.type !== requestedType) {
+    return NextResponse.json({ error: "Requirement type does not match the saved draft" }, { status: 400 });
+  }
+  if (body.is_generic != null && body.is_generic !== isGeneric) {
+    return NextResponse.json({ error: "Generic flag does not match the saved draft" }, { status: 400 });
+  }
+  if (isGeneric && requestedType !== "NEW_VARIETY") {
+    return NextResponse.json(
+      { error: "Generic requirements are only supported for NEW_VARIETY" },
+      { status: 400 }
+    );
+  }
+
+  const effectiveLabelName = label_name !== undefined ? label_name : existing.label_name;
+  const effectiveCategoryName = category_name !== undefined ? category_name : existing.category_name;
+  const effectiveExpiryDate = expiry_date !== undefined ? expiry_date : existing.expiry_date;
+  const effectiveQtyRequired = qty_required !== undefined ? qty_required : existing.qty_required;
+  const effectiveExpectedPrice = expected_price !== undefined ? expected_price : existing.expected_price;
+
+  if (requestedType !== "RESTOCK") {
+    const missingFields: string[] = [];
+    if (!isGeneric && !effectiveLabelName?.trim()) missingFields.push("label_name");
+    if (!effectiveCategoryName?.trim()) missingFields.push("category_name");
+    if (!effectiveExpiryDate) missingFields.push("expiry_date");
+    if (!effectiveQtyRequired?.trim()) missingFields.push("qty_required");
+    if (effectiveExpectedPrice == null || !Number.isFinite(Number(effectiveExpectedPrice)) || Number(effectiveExpectedPrice) <= 0) {
+      missingFields.push("expected_price");
+    }
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { error: `Missing or invalid required fields: ${missingFields.join(", ")}` },
+        { status: 400 }
+      );
+    }
+  }
 
   // ── 1. Resolve assignee via rule engine ────────────────────
-  const assigneeId = await resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id, category_name);
+  const assigneeId = await resolveAssignee(products, label_id, bijnis_buyer_id, supply_tl_id, effectiveCategoryName, isGeneric);
 
   // ── 2. Correct requirement type based on catalog matches ───
-  const correctedType = resolveType(body.type ?? "NEW_LABEL", label_id);
+  const correctedType = resolveType(requestedType, label_id, isGeneric);
 
   // ── 3. Update requirements row ─────────────────────────────
   const updatePayload: Record<string, unknown> = {
     type:       correctedType,
     status:     "OPEN",
     updated_by: userId ? parseInt(userId, 10) : null,
+    is_generic: isGeneric,
   };
   if (label_name    !== undefined) updatePayload.label_name    = label_name    || null;
-  if (label_id      !== undefined) updatePayload.label_id      = label_id      || null;
+  if (label_id      !== undefined || isGeneric) updatePayload.label_id = isGeneric ? null : (label_id || null);
   if (category_name !== undefined) updatePayload.category_name = category_name || null;
   if (expiry_date   !== undefined) updatePayload.expiry_date   = expiry_date   || null;
   if (qty_required   !== undefined) updatePayload.qty_required   = qty_required   || null;

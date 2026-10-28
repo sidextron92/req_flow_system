@@ -6,10 +6,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { runExtraction } from "@/lib/ai.service";
 
+const EXTRACTION_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
 interface ExtractBody {
   requirementType: string;
   notes: string;
   storagePaths: string[];
+  isGeneric?: boolean;
 }
 
 export async function POST(
@@ -25,7 +28,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { requirementType, notes, storagePaths } = body;
+  const { requirementType, notes, storagePaths, isGeneric = false } = body;
 
   if (!requirementId || !requirementType) {
     return NextResponse.json(
@@ -34,10 +37,18 @@ export async function POST(
     );
   }
 
+  if (isGeneric && requirementType !== "NEW_VARIETY") {
+    return NextResponse.json(
+      { error: "Generic requirements are only supported for NEW_VARIETY" },
+      { status: 400 }
+    );
+  }
+
   // Download image files from Supabase Storage as base64.
   // Audio paths (prefixed "audio:") are skipped — the client-side
   // transcription already appended the transcript to `notes` before submit.
   const images: { base64: string; mimeType: string }[] = [];
+  let unsupportedImageFound = false;
   const imageBucket = process.env.SUPABASE_BUCKET ?? "reqflow_images";
 
   await Promise.all(
@@ -54,12 +65,27 @@ export async function POST(
         }
 
         const buffer = Buffer.from(await data.arrayBuffer());
+        const mimeType = data.type || "image/jpeg";
+        if (!EXTRACTION_IMAGE_TYPES.has(mimeType)) {
+          unsupportedImageFound = true;
+          return;
+        }
         images.push({
           base64: buffer.toString("base64"),
-          mimeType: data.type || "image/jpeg",
+          mimeType,
         });
       })
   );
+
+  if (unsupportedImageFound) {
+    return NextResponse.json({
+      data: {
+        extracted_data: null,
+        model_used: null,
+        ai_error: "Unsupported image format. Please upload JPEG, PNG, GIF, or WEBP files.",
+      },
+    });
+  }
 
   let extractedData: Record<string, unknown> | null = null;
   let modelUsed: string | null = null;
@@ -70,6 +96,7 @@ export async function POST(
       requirementType,
       notes: notes ?? "",
       images,
+      isGeneric,
     });
 
     extractedData = extraction.extracted_data;

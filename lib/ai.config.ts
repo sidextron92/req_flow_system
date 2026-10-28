@@ -147,9 +147,12 @@ const PROMPT_BUILDERS: Record<string, (date: string) => string> = {
 };
 
 /** Returns the system prompt for the given requirement type with today's date baked in. */
-export function getSystemPrompt(requirementType: string): string {
+export function getSystemPrompt(requirementType: string, isGeneric = false): string {
   const builder = PROMPT_BUILDERS[requirementType] ?? PROMPT_BUILDERS.RESTOCK;
-  return builder(today());
+  const prompt = builder(today());
+  if (!isGeneric) return prompt;
+
+  return `${prompt}\n- This is a generic NEW_VARIETY requirement. A specific brand or label is optional. Do not guess a label; set label_name to null unless the manager explicitly provides one.`;
 }
 
 // Legacy export so any remaining imports of DEFAULT_SYSTEM_PROMPT don't break.

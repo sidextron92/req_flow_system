@@ -12,6 +12,7 @@ export interface ExtractionInput {
   requirementType: string;    // DB enum value e.g. "RESTOCK"
   notes: string;
   images: { base64: string; mimeType: string }[];
+  isGeneric?: boolean;
   systemPrompt?: string;      // Override default if provided
 }
 
@@ -30,6 +31,14 @@ export async function runExtraction(input: ExtractionInput): Promise<ExtractionR
   throw new Error(`Unsupported AI provider: ${provider}`);
 }
 
+function resolveSystemPrompt(input: ExtractionInput): string {
+  if (input.systemPrompt == null) {
+    return getSystemPrompt(input.requirementType, input.isGeneric);
+  }
+  if (!input.isGeneric) return input.systemPrompt;
+  return `${input.systemPrompt}\n- This is a generic NEW_VARIETY requirement. A specific brand or label is optional. Do not guess a label; set label_name to null unless the manager explicitly provides one.`;
+}
+
 // ── Anthropic (Claude) ────────────────────────────────────────
 
 async function runAnthropicExtraction(input: ExtractionInput): Promise<ExtractionResult> {
@@ -39,7 +48,7 @@ async function runAnthropicExtraction(input: ExtractionInput): Promise<Extractio
   }
 
   const client = new Anthropic({ apiKey });
-  const systemPrompt = input.systemPrompt ?? getSystemPrompt(input.requirementType);
+  const systemPrompt = resolveSystemPrompt(input);
 
   const userContent: Anthropic.MessageParam["content"] = [
     // Images first (Claude handles multimodal better this way)
@@ -95,7 +104,7 @@ async function runGeminiExtraction(input: ExtractionInput): Promise<ExtractionRe
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const systemPrompt = input.systemPrompt ?? getSystemPrompt(input.requirementType);
+  const systemPrompt = resolveSystemPrompt(input);
 
   const textContext = [
     `Requirement Type: ${input.requirementType}`,

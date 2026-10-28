@@ -7,9 +7,11 @@ import { validateExtraction, type ValidationResult } from "@/lib/extraction-vali
 interface ExtractionReviewProps {
   requirementId: string;
   requirementType: string;   // DB enum value e.g. "RESTOCK"
+  isGeneric: boolean;
   userId: string;
   initialExtraction: Record<string, unknown> | null;
   modelUsed: string | null;
+  extractionError: string | null;
   onClose: () => void;
   onSaved: () => void;       // called after successful Done → triggers list refresh
 }
@@ -38,9 +40,11 @@ interface FuzzyMatchState {
 export default function ExtractionReview({
   requirementId,
   requirementType,
+  isGeneric,
   userId,
   initialExtraction,
   modelUsed,
+  extractionError,
   onClose,
   onSaved,
 }: ExtractionReviewProps) {
@@ -101,7 +105,7 @@ export default function ExtractionReview({
 
     async function doPrefetch() {
       prefetchInFlight.current = true;
-      const label_name =
+      const label_name = !isGeneric &&
         typeof extraction!.label_name === "string" && extraction!.label_name.trim()
           ? extraction!.label_name.trim()
           : undefined;
@@ -152,7 +156,7 @@ export default function ExtractionReview({
     }
 
     doPrefetch();
-  }, [extraction, view]);
+  }, [extraction, view, isGeneric]);
 
   // ── Save to DB ─────────────────────────────────────────────
   async function saveRequirement(
@@ -177,6 +181,8 @@ export default function ExtractionReview({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId,
+          type: requirementType,
+          is_generic: isGeneric,
           label_name:        finalExtraction.label_name    ?? null,
           label_id:          finalExtraction.label_id      ?? null,
           category_name:     finalExtraction.category_name ?? null,
@@ -223,7 +229,7 @@ export default function ExtractionReview({
     selProducts: Record<string, { name: string; id: string; brand_id: string | null; brand_name: string | null }>
   ): Record<string, unknown> {
     const merged = { ...base };
-    if (selLabel) {
+    if (selLabel && !isGeneric) {
       merged.label_name = selLabel.name;
       merged.label_id   = selLabel.id || null;
     }
@@ -240,7 +246,7 @@ export default function ExtractionReview({
     // Only apply if every resolved product that has a brand_id shares the same one.
     const resolvedProducts = Object.values(selProducts).filter((s) => Boolean(s.brand_id));
 
-    if (resolvedProducts.length > 0) {
+    if (!isGeneric && resolvedProducts.length > 0) {
       const allSameBrandId = resolvedProducts.every((s) => s.brand_id === resolvedProducts[0].brand_id);
       if (allSameBrandId) {
         merged.label_id   = resolvedProducts[0].brand_id;
@@ -256,7 +262,7 @@ export default function ExtractionReview({
     setIsFuzzyChecking(true);
     setFuzzyError(null);
 
-    const label_name =
+    const label_name = !isGeneric &&
       typeof finalExtraction.label_name === "string" && finalExtraction.label_name.trim()
         ? finalExtraction.label_name.trim()
         : undefined;
@@ -344,7 +350,7 @@ export default function ExtractionReview({
       });
       // Default to "as typed" if no exact match pre-selected
       setSelectedLabel(
-        preLabel ?? { name: label_name ?? "", id: "", supply_tl_id: null }
+        isGeneric ? null : (preLabel ?? { name: label_name ?? "", id: "", supply_tl_id: null })
       );
       setSelectedProducts(preProducts);
       setEditedLabelText(label_name ?? "");
@@ -434,7 +440,7 @@ export default function ExtractionReview({
     // If expected_price confidence < 0.9, force it into missing fields
     const conf = extraction.confidence as Record<string, number> | null | undefined;
     const priceConfidence = conf?.expected_price ?? (extraction.expected_price != null ? 1 : 0);
-    let validation = validateExtraction(extraction, requirementType);
+    let validation = validateExtraction(extraction, requirementType, isGeneric);
     if (priceConfidence < 0.9) {
       const priceLabel = "Expected price per unit (including tax)";
       const priceKey = "expected_price";
@@ -489,7 +495,7 @@ export default function ExtractionReview({
         setIsFilling(false);
 
         // Now run normal validation for remaining missing fields
-        const validation = validateExtraction(updated, requirementType);
+        const validation = validateExtraction(updated, requirementType, isGeneric);
         if (validation.valid) {
           setChatMessages((prev) => [
             ...prev,
@@ -548,7 +554,7 @@ export default function ExtractionReview({
           ]);
           setIsFilling(false);
 
-          const validation = validateExtraction(finalUpdated, requirementType);
+          const validation = validateExtraction(finalUpdated, requirementType, isGeneric);
           if (validation.valid) {
             setChatMessages((prev) => [
               ...prev,
@@ -638,7 +644,7 @@ export default function ExtractionReview({
         setExtraction(updated);
       }
 
-      const newValidation = validateExtraction(updated, requirementType);
+      const newValidation = validateExtraction(updated, requirementType, isGeneric);
       setPendingValidation(newValidation);
 
       if (newValidation.valid) {
@@ -678,7 +684,7 @@ export default function ExtractionReview({
       { role: "assistant", text: `Got it! Category set to **${cat}**.` },
     ]);
 
-    const validation = validateExtraction(updated, requirementType);
+    const validation = validateExtraction(updated, requirementType, isGeneric);
     if (validation.valid) {
       setChatMessages((prev) => [
         ...prev,
@@ -790,7 +796,7 @@ export default function ExtractionReview({
         })()
       : false;
 
-  const validation = extraction ? validateExtraction(extraction, requirementType) : { valid: true, missingFields: [], missingKeys: [] };
+  const validation = extraction ? validateExtraction(extraction, requirementType, isGeneric) : { valid: true, missingFields: [], missingKeys: [] };
   const needsValidationChat = !validation.valid;
   const needsFuzzyInput = prefetchResult?.needsInput ?? false;
   const willNeedUserInput = needsCategoryCheck || needsValidationChat || needsFuzzyInput;
@@ -1181,7 +1187,11 @@ export default function ExtractionReview({
               ) : (
                 <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex flex-col gap-1">
                   <p className="text-sm text-red-700 font-medium">Extraction failed</p>
-                  <p className="text-xs text-red-500">Check your API key and try again.</p>
+                  <p className="text-xs text-red-500">
+                    {extractionError?.includes("media_type")
+                      ? "Unsupported image format. Please upload JPEG, PNG, GIF, or WEBP files."
+                      : extractionError ?? "Please try again."}
+                  </p>
                 </div>
               )}
 

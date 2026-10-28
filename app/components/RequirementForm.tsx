@@ -5,6 +5,7 @@ import { toDBType } from "@/lib/requirement-type.map";
 import ExtractionReview from "./ExtractionReview";
 
 const REQUIREMENT_TYPES = ["Restock", "New Label", "New Variety"] as const;
+const EXTRACTION_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 interface RequirementFormProps {
   isOpen: boolean;
@@ -94,6 +95,7 @@ export default function RequirementForm({
   // ── Non-Restock state ───────────────────────────────────────
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [notes, setNotes] = useState("");
+  const [isGeneric, setIsGeneric] = useState(false);
 
   // ── Restock state ───────────────────────────────────────────
   const [expiryDate, setExpiryDate] = useState<string>("");
@@ -174,11 +176,22 @@ export default function RequirementForm({
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    const compressed = await Promise.all(files.map(compressImage));
+    const supportedFiles = files.filter((file) => EXTRACTION_IMAGE_TYPES.has(file.type));
+    if (supportedFiles.length !== files.length) {
+      setSubmitError("Unsupported image format. Please upload JPEG, PNG, GIF, or WEBP files.");
+    } else {
+      setSubmitError(null);
+    }
+    if (supportedFiles.length === 0) {
+      e.target.value = "";
+      return;
+    }
+
+    const compressed = await Promise.all(supportedFiles.map(compressImage));
     const newImages = compressed.map((file, i) => ({
-      id: `${files[i].name}-${Date.now()}`,
+      id: `${supportedFiles[i].name}-${Date.now()}`,
       url: URL.createObjectURL(file),
-      name: files[i].name,
+      name: supportedFiles[i].name,
       file,
     }));
     setImages((prev) => [...prev, ...newImages]);
@@ -274,6 +287,7 @@ export default function RequirementForm({
     setType("");
     setImages([]);
     setNotes("");
+    setIsGeneric(false);
     setExpiryDate("");
     setSelectedBrand(null);
     setSelectedProducts([]);
@@ -409,6 +423,7 @@ export default function RequirementForm({
       formData.append("userId", String(userId));
       formData.append("type", type);
       formData.append("notes", notes);
+      formData.append("isGeneric", String(isGeneric));
 
       for (const img of images) {
         formData.append("images", img.file);
@@ -454,6 +469,7 @@ export default function RequirementForm({
           requirementType: toDBType(type),
           notes,
           storagePaths,
+          isGeneric,
         }),
       });
 
@@ -547,7 +563,11 @@ export default function RequirementForm({
                   <button
                     key={t}
                     type="button"
-                    onClick={() => setType(isSelected ? "" : t)}
+                    onClick={() => {
+                      const nextType = isSelected ? "" : t;
+                      setType(nextType);
+                      if (nextType !== "New Variety") setIsGeneric(false);
+                    }}
                     disabled={isSubmitting}
                     className={`flex-1 text-sm font-medium px-3 py-3 rounded-xl border transition-colors disabled:opacity-60 ${
                       isSelected
@@ -665,6 +685,22 @@ export default function RequirementForm({
           {/* ── NON-RESTOCK FIELDS ───────────────────────────── */}
           {!isRestock && type !== "" && (
             <>
+              {type === "New Variety" && (
+                <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isGeneric}
+                    onChange={(e) => setIsGeneric(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-semibold text-gray-700">Generic requirement</span>
+                    <span className="text-xs text-gray-500">Use when this variety is not tied to a particular label or brand.</span>
+                  </span>
+                </label>
+              )}
+
               {/* Upload Images */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-semibold text-gray-700">
@@ -698,7 +734,7 @@ export default function RequirementForm({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   capture="environment"
                   className="hidden"
                   onChange={handleFileChange}
@@ -707,7 +743,7 @@ export default function RequirementForm({
                 <input
                   ref={galleryInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   multiple
                   className="hidden"
                   onChange={handleFileChange}
@@ -756,7 +792,9 @@ export default function RequirementForm({
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none disabled:opacity-60"
                 />
                 <p className="text-xs text-gray-500">
-                  {type === "New Label" || type === "New Variety"
+                  {type === "New Variety" && isGeneric
+                    ? "Mention category, quantity needed, delivery deadline and appx price"
+                    : type === "New Label" || type === "New Variety"
                     ? "Mention brand name, quantity needed, delivery deadline and appx price"
                     : "Make sure to mention Quantity, Deadline and Price information"}
                 </p>
@@ -912,9 +950,11 @@ export default function RequirementForm({
         <ExtractionReview
           requirementId={extraction.requirementId}
           requirementType={extraction.requirementType}
+          isGeneric={isGeneric}
           userId={String(userId)}
           initialExtraction={extraction.extractedData}
           modelUsed={extraction.modelUsed}
+          extractionError={extraction.aiError}
           onClose={handleExtractionClose}
           onSaved={onSubmitSuccess}
         />

@@ -20,7 +20,14 @@ type RequirementType = "RESTOCK" | "NEW_VARIETY" | "NEW_LABEL";
 // product_id found → RESTOCK
 // label_id found (no product_id) → NEW_VARIETY
 // neither found → NEW_LABEL
-function resolveType(products: Product[] | undefined, label_id: string | null | undefined): RequirementType {
+function resolveType(
+  currentType: RequirementType,
+  products: Product[] | undefined,
+  label_id: string | null | undefined,
+  isGeneric: boolean,
+): RequirementType {
+  if (isGeneric) return "NEW_VARIETY";
+  if (currentType === "RESTOCK") return "RESTOCK";
   const hasProductId = products?.some((p) => p.product_id);
   if (hasProductId) return "RESTOCK";
   if (label_id) return "NEW_VARIETY";
@@ -39,7 +46,18 @@ async function resolveAssignee(
   bijnis_buyer_id: string | null | undefined,
   supply_tl_id: string | null | undefined,
   category_name: string | null | undefined,
+  isGeneric: boolean,
 ): Promise<number | null> {
+  if (isGeneric) {
+    if (!category_name) return null;
+    const { data } = await supabaseAdmin
+      .from("category_buyer_defaults")
+      .select("user_id")
+      .eq("category_name", category_name)
+      .single();
+    return data?.user_id ? Number(data.user_id) : null;
+  }
+
   const hasProductId = products?.some((p) => p.product_id);
   if (hasProductId && bijnis_buyer_id && !Number.isNaN(Number(bijnis_buyer_id))) {
     return Number(bijnis_buyer_id);
@@ -93,7 +111,7 @@ export async function POST(
   // Fetch the original requirement
   const { data: original, error: fetchError } = await supabaseAdmin
     .from("requirements")
-    .select("id, type, status, label_name, label_id, category_id, category_name, expiry_date, notes, remarks, qty_required, expected_price, attachments, comment_log, created_by, created_at, updated_at, updated_by, assigned_to_user_id, assigned_date, products_suggested_count, requirement_products ( id, product_id, product_name, notes )")
+    .select("id, type, status, label_name, label_id, is_generic, category_id, category_name, expiry_date, notes, remarks, qty_required, expected_price, attachments, comment_log, created_by, created_at, updated_at, updated_by, assigned_to_user_id, assigned_date, products_suggested_count, requirement_products ( id, product_id, product_name, notes )")
     .eq("id", requirementId)
     .single();
 
@@ -112,12 +130,29 @@ export async function POST(
     return NextResponse.json({ error: `Cannot reopen a requirement with status ${original.status}` }, { status: 403 });
   }
 
+  if (original.type !== "RESTOCK") {
+    const invalidFields: string[] = [];
+    if (!original.is_generic && !original.label_name?.trim()) invalidFields.push("label_name");
+    if (!original.category_name?.trim()) invalidFields.push("category_name");
+    if (!original.qty_required?.trim()) invalidFields.push("qty_required");
+    if (original.expected_price == null || !Number.isFinite(Number(original.expected_price)) || Number(original.expected_price) <= 0) {
+      invalidFields.push("expected_price");
+    }
+    if (invalidFields.length > 0) {
+      return NextResponse.json(
+        { error: `Cannot reopen requirement with missing or invalid fields: ${invalidFields.join(", ")}` },
+        { status: 400 }
+      );
+    }
+  }
+
   // ── 1. Insert new cloned requirement ─────────────────────────
   const insertPayload: Record<string, unknown> = {
     type:                original.type,
     status:              "OPEN",
     label_name:          original.label_name,
-    label_id:            original.label_id,
+    label_id:            original.is_generic ? null : original.label_id,
+    is_generic:          original.is_generic,
     category_id:         original.category_id,
     category_name:       original.category_name,
     expiry_date:         newExpiryDate,
@@ -136,7 +171,7 @@ export async function POST(
   const { data: newReq, error: insertError } = await supabaseAdmin
     .from("requirements")
     .insert(insertPayload)
-    .select("id, type, status, label_name, label_id, category_name, expiry_date, notes, remarks, qty_required, expected_price, attachments, comment_log, created_by, created_at, updated_at, updated_by, assigned_to_user_id, assigned_date, products_suggested_count, parent_requirement_id")
+    .select("id, type, status, label_name, label_id, is_generic, category_name, expiry_date, notes, remarks, qty_required, expected_price, attachments, comment_log, created_by, created_at, updated_at, updated_by, assigned_to_user_id, assigned_date, products_suggested_count, parent_requirement_id")
     .single();
 
   if (insertError || !newReq) {
@@ -177,7 +212,7 @@ export async function POST(
   }));
 
   // Re-run type correction
-  const correctedType = resolveType(products, newReq.label_id);
+  const correctedType = resolveType(newReq.type as RequirementType, products, newReq.label_id, newReq.is_generic);
 
   // Re-run assignee resolution
   // We need to determine bijnis_buyer_id and supply_tl_id from the catalog
@@ -209,7 +244,7 @@ export async function POST(
     }
   }
 
-  const assigneeId = await resolveAssignee(products, newReq.label_id, bijnisBuyerId, supplyTlId, newReq.category_name);
+  const assigneeId = await resolveAssignee(products, newReq.label_id, bijnisBuyerId, supplyTlId, newReq.category_name, newReq.is_generic);
 
   // ── 4. Update the clone with resolved type and assignee ────
   const updatePayload: Record<string, unknown> = {

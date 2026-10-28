@@ -59,6 +59,7 @@ interface Requirement {
   status: string;
   label_name: string | null;
   label_id: string | null;
+  is_generic: boolean;
   category_id: string | null;
   category_name: string | null;
   expiry_date: string | null;
@@ -2027,6 +2028,11 @@ function DetailContent() {
             Re-Opened
           </span>
         )}
+        {req.is_generic && (
+          <span className="shrink-0 text-xs font-medium px-2.5 py-1 rounded-full bg-violet-100 text-violet-700">
+            Generic
+          </span>
+        )}
       </header>
 
       {/* Tab bar */}
@@ -2094,6 +2100,7 @@ function DetailContent() {
                   }
                 />
               )}
+              {req.is_generic && <Row label="Requirement" value="Generic" />}
               <div className="flex flex-col gap-0.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-400">Category</span>

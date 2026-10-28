@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS requirements (
   -- Label info
   label_name          TEXT,
   label_id            TEXT,
+  is_generic          BOOLEAN NOT NULL DEFAULT FALSE,
 
   -- Category (denormalized name stored alongside FK for query convenience)
   category_id         UUID REFERENCES categories(id) ON DELETE SET NULL,
@@ -102,7 +103,7 @@ CREATE TABLE IF NOT EXISTS requirements (
   -- Quantity required (mandatory for NEW_LABEL and NEW_VARIETY)
   qty_required        VARCHAR,
 
-  -- Expected price (mandatory for all requirement types)
+  -- Expected price (application-required and > 0 for NEW_LABEL and NEW_VARIETY)
   expected_price      NUMERIC(10,2),
 
   -- Free text
@@ -267,8 +268,11 @@ CREATE INDEX IF NOT EXISTS idx_requirements_parent_id ON requirements(parent_req
 -- Add qty_required field (mandatory for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS qty_required VARCHAR;
 
--- Add expected_price field (mandatory for all requirement types)
+-- Add expected_price field (application-required and > 0 for NEW_LABEL and NEW_VARIETY)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS expected_price NUMERIC(10,2);
+
+-- Application logic permits generic requirements only for NEW_VARIETY.
+ALTER TABLE requirements ADD COLUMN IF NOT EXISTS is_generic BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Add updated_by to requirements (used by audit trigger)
 ALTER TABLE requirements ADD COLUMN IF NOT EXISTS updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;

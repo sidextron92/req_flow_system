@@ -3,6 +3,7 @@ import { supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { toDBType } from "@/lib/requirement-type.map";
 
 const AUDIO_BUCKET = "reqflow_audio";
+const EXTRACTION_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 // GET /api/requirements?userId=123
 export async function GET(req: NextRequest) {
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabaseAdmin
     .from("requirements")
     .select(`
-      id, type, status, label_name, label_id,
+      id, type, status, label_name, label_id, is_generic,
       category_id, category_name, expiry_date,
       notes, remarks, qty_required, expected_price, attachments, comment_log, created_at, updated_at,
       assigned_to_user_id, assigned_date, products_suggested_count, parent_requirement_id,
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
   const categoryName = formData.get("categoryName") as string | null;
   const expiryDate  = formData.get("expiryDate") as string | null;
   const remarks     = formData.get("remarks") as string | null;
+  const isGeneric   = formData.get("isGeneric") === "true";
 
   // Products — sent as JSON string
   const productsRaw = formData.get("products") as string | null;
@@ -59,9 +61,23 @@ export async function POST(req: NextRequest) {
   // Map UI type → DB enum
   const type = toDBType(typeRaw);
 
+  if (isGeneric && type !== "NEW_VARIETY") {
+    return NextResponse.json(
+      { error: "Generic requirements are only supported for New Variety" },
+      { status: 400 }
+    );
+  }
+
   // ── Upload images to Supabase Storage (parallel) ───────────
   const imageFiles = formData.getAll("images") as File[];
   const attachments: { url: string; file_name: string; storage_path: string }[] = [];
+
+  if (imageFiles.some((file) => !EXTRACTION_IMAGE_TYPES.has(file.type))) {
+    return NextResponse.json(
+      { error: "Unsupported image format. Please upload JPEG, PNG, GIF, or WEBP files." },
+      { status: 400 }
+    );
+  }
 
   const imageUploadResults = await Promise.all(
     imageFiles.map(async (file) => {
@@ -152,6 +168,7 @@ export async function POST(req: NextRequest) {
       notes:         notesRaw     || null,
       label_name:    labelName    || null,
       label_id:      labelId      || null,
+      is_generic:    isGeneric,
       category_id:   categoryId   || null,
       category_name: categoryName || null,
       expiry_date:   expiryDate   || null,

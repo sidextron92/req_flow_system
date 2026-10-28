@@ -28,6 +28,7 @@ const REQUIRED_BY_TYPE: Record<
   ],
   NEW_VARIETY: [
     { key: "label_name",     label: "Brand / label name",              check: nonEmpty },
+    { key: "category_name",  label: "Product category",                check: nonEmpty },
     { key: "expiry_date",    label: "Delivery deadline",               check: nonEmpty },
     { key: "qty_required",   label: "Quantity required (e.g. 30 units)", check: nonEmpty },
     { key: "expected_price", label: "Expected price per unit (including tax)", check: isValidPrice },
@@ -41,16 +42,20 @@ function nonEmpty(v: unknown): boolean {
 function isValidPrice(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   const num = Number(v);
-  return !isNaN(num) && num >= 0;
+  return !isNaN(num) && num > 0;
 }
 
 export function validateExtraction(
   extracted: Record<string, unknown>,
-  requirementType: string
+  requirementType: string,
+  isGeneric = false,
 ): ValidationResult {
   const rules = REQUIRED_BY_TYPE[requirementType] ?? REQUIRED_BY_TYPE.NEW_VARIETY;
+  const applicableRules = isGeneric
+    ? rules.filter((rule) => rule.key !== "label_name")
+    : rules;
 
-  const missing = rules.filter((r) => !r.check(extracted[r.key]));
+  const missing = applicableRules.filter((r) => !r.check(extracted[r.key]));
 
   return {
     valid: missing.length === 0,

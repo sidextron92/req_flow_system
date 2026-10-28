@@ -14,6 +14,7 @@ interface ReExtractBody {
   requirementType: string;   // DB enum value
   notes: string;
   systemPrompt: string;
+  isGeneric?: boolean;
   // Base64-encoded images already stored — we re-fetch URLs from DB
   // and re-encode them here. Client sends stored attachment storage_paths.
   storagePaths: string[];
@@ -27,10 +28,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { requirementId, requirementType, notes, systemPrompt, storagePaths } = body;
+  const { requirementId, requirementType, notes, systemPrompt, storagePaths, isGeneric = false } = body;
 
   if (!requirementId || !requirementType) {
     return NextResponse.json({ error: "requirementId and requirementType are required" }, { status: 400 });
+  }
+  if (isGeneric && requirementType !== "NEW_VARIETY") {
+    return NextResponse.json({ error: "Generic requirements are only supported for NEW_VARIETY" }, { status: 400 });
   }
 
   // ── Re-download images from Supabase Storage as base64 ──────
@@ -82,6 +86,7 @@ export async function POST(req: NextRequest) {
       requirementType,
       notes: enrichedNotes,
       images,
+      isGeneric,
       systemPrompt,
     });
   } catch (err) {

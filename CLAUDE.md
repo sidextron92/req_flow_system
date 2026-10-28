@@ -4,10 +4,10 @@
 Darkstore requirement management app. Darkstore managers capture three types of requirements:
 - **RESTOCK** — reorder products already in store
 - **NEW_LABEL** — introduce a new brand/label
-- **NEW_VARIETY** — add new variants of an existing brand
+- **NEW_VARIETY** — add new variants of an existing brand, or create a generic variety requirement not tied to a brand
 
 Core workflow:
-- **NEW_LABEL / NEW_VARIETY** — Manager fills a form (images + voice note) → AI extracts structured data → **category confidence check** (if < 70%, chat prompts user to confirm/correct category with AI-suggested pills) → chat loop fills any remaining gaps → fuzzy match against brand/product catalog → saved to DB as OPEN.
+- **NEW_LABEL / NEW_VARIETY** — Manager fills a form (images + voice note) → AI extracts structured data → **category confidence check** (if < 90%, chat prompts user to confirm/correct category with AI-suggested pills) → chat loop fills any remaining gaps → fuzzy match against brand/product catalog → saved to DB as OPEN. NEW_VARIETY additionally supports a **Generic requirement** checkbox that makes the label optional and uses category-default assignment.
 - **RESTOCK** — Manager selects label via fuzzy-search bottom sheet → selects products from that brand's catalog (2×2 image grid, multi-select) → picks expected delivery date → optionally adds remarks via voice note → **no AI extraction** → saved to DB as OPEN with assignment resolved from catalog IDs.
 
 ## Stack
@@ -82,7 +82,7 @@ npm run lint   # ESLint
 ## DB schema (key tables)
 - **users** — `id BIGINT PK`, name, role, phone, darkstore_id, darkstore_name
 - **categories** — `id UUID PK`, name
-- **requirements** — `id UUID PK`, type (enum), status (default DRAFT, includes `AUTO_COMPLETED`), label_name, label_id, category_id, category_name (denorm), expiry_date, qty_required, remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
+- **requirements** — `id UUID PK`, type (enum), status (default DRAFT, includes `AUTO_COMPLETED`), label_name, label_id, `is_generic BOOLEAN NOT NULL DEFAULT FALSE` (application allows it only for `NEW_VARIETY`), category_id, category_name (denorm), expiry_date, qty_required, `expected_price` (application requires `> 0` for NEW_LABEL/NEW_VARIETY), remarks, attachments `JSONB [{url, file_name, storage_path}]`, comment_log `JSONB`, created_by (FK users), updated_by (FK users, nullable — set by every write path for audit), assigned_to_user_id, assigned_date, `products_suggested_count INT DEFAULT 0`, `parent_requirement_id UUID FK requirements(id)` — set when a requirement is cloned via Re-Open
 - **requirement_products** — `id UUID PK`, requirement_id FK, product_id, product_name, notes. RESTOCK allows multiple rows; others max 1
 - **mapped_products** — `id UUID PK`, productid, requirementid FK requirements(id) ON DELETE CASCADE, brandid, productname, variantid, landingprice, image_url, article_code, gender, availablestock, colorname, `stock_blocking_live_on TIMESTAMPTZ`, createdby FK users(id), createdat, updatedat. Unique index on `(requirementid, variantid)`. Stores trading products suggested by supply team against a requirement.
 - **brand_product_data** — brand_name, brand_id, product_name, product_id, bijnis_buyer_id, bijnis_buyer_name, supply_tl_id, supply_tl_name, category_name, **image**, **article_code**. Has GiST trigram indexes for fuzzy search
@@ -200,6 +200,7 @@ All notifications are fire-and-forget (IIFE async) — failures never affect the
 - Bottom-sheet modals with slide-up animation
 - Pill buttons for fuzzy match selection (green = all options; selected has tick icon)
 - `Re-Opened` badge: orange pill (`bg-orange-100 text-orange-700`) on home cards and detail header when `parent_requirement_id` is set
+- `Generic` badge: violet pill on home cards and detail header when `is_generic` is true
 
 ## Architecture notes
 - AI extraction returns a JSON blob; `ExtractionReview` drives a state machine: `extraction → [category-correction chat] → [missing-fields chat] → fuzzy-match → success`. The category step is skipped if `confidence.category_name ≥ 0.9` and `category_name` is non-null.
@@ -241,7 +242,11 @@ This section documents every step end-to-end. Reference a step number when descr
 
 #### 1.2 NEW_LABEL / NEW_VARIETY (AI extraction flow)
 1. Manager selects requirement **type** and **category**.
+   - Only **NEW_VARIETY** shows a **Generic requirement** checkbox.
+   - Selecting it persists `is_generic = true`, makes `label_name` optional, and preserves the `NEW_VARIETY` type.
+   - `RESTOCK` and `NEW_LABEL` can never be generic; changing away from NEW_VARIETY resets the checkbox.
 2. Manager optionally uploads images and/or records a voice note (Deepgram transcribes Hindi in-browser via `POST /api/transcribe`; result is pasted into the **Notes** field).
+   - Extraction images are restricted to JPEG, PNG, WEBP, and GIF. Unsupported formats such as SVG are rejected before upload and checked again by the extraction endpoint.
 3. On submit, the client POSTs to `/api/requirements`:
    - Creates a row in `requirements` with `status = DRAFT`.
    - Uploads each image to Supabase Storage bucket (`reqflow_images`); stores `[{url, file_name, storage_path}]` in `attachments` JSONB.
@@ -255,8 +260,8 @@ This section documents every step end-to-end. Reference a step number when descr
 
 2.1 Provider is set in `AI_CONFIG.provider` (`lib/ai.config.ts`) — currently `"anthropic"` (haiku). Switch to `"gemini"` there to change models.
 2.2 The system prompt is **type-specific** and built fresh each call (today's date is injected):
-  - **NEW_LABEL** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `remarks`, `products[]` (max 1 representative product).
-  - **NEW_VARIETY** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `remarks`, `products[]` (multiple variants allowed).
+  - **NEW_LABEL** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `expected_price`, `remarks`, `products[]` (max 1 representative product).
+  - **NEW_VARIETY** — extracts `label_name`, `category_name`, `expiry_date`, `qty_required`, `expected_price`, `remarks`, `products[]` (multiple variants allowed). For generic varieties, the prompt treats `label_name` as optional and must not guess it.
   - **RESTOCK** — no AI prompt. RESTOCK uses the manual flow (Step 1.1) without extraction.
 2.3 AI also returns `confidence{}` (per-field 0–1 score) and `extraction_notes` — `confidence` is used for the category check threshold; `extraction_notes` is hidden from the UI.
 2.4 AI must **never** output `label_id` or `product_id` — those are catalog IDs resolved only via fuzzy match (Step 4).
@@ -283,9 +288,12 @@ The `categoryCheckDone` flag resets when **Re-run** is used, so a new extraction
 
 | Type | Required fields |
 |------|----------------|
-| NEW_LABEL | `label_name`, `category_name`, `expiry_date`, `qty_required` |
-| NEW_VARIETY | `expiry_date`, `qty_required` |
+| NEW_LABEL | `label_name`, `category_name`, `expiry_date`, `qty_required`, `expected_price > 0` |
+| NEW_VARIETY (non-generic) | `label_name`, `category_name`, `expiry_date`, `qty_required`, `expected_price > 0` |
+| NEW_VARIETY (generic) | `category_name`, `expiry_date`, `qty_required`, `expected_price > 0`; `label_name` is optional |
 | RESTOCK | No AI validation — fields are captured manually in the form (Step 1.1) |
+
+The final PATCH repeats these checks server-side. `is_generic = true` is rejected for RESTOCK and NEW_LABEL, and an expected price of `0` or less is rejected.
 
 3.2 If **valid** → skip to Step 4 (fuzzy match check).
 3.3 If **invalid** → chat view switches to "Confirm Details" mode (missing-fields sub-step). AI is given `currentExtraction` + `missingKeys` + the user's natural language reply → returns `updated_extraction` JSON.
@@ -334,6 +342,7 @@ Shown when at least one brand or product has suggestions but no exact match.
 - Replaces each `product_name` / `product_id` in `products[]` with the selected product pick.
 - **Label override from product**: if every selected product that has a `brand_id` shares the same `brand_id`, that `brand_id` and `brand_name` overwrite `label_id`/`label_name` (product-derived brand wins over separately matched label).
 - If selected products have different `brand_id` values, the label match result stands.
+- **Generic NEW_VARIETY exception**: products may still be fuzzy-matched and retain `product_id`, but product matches never populate or overwrite requirement-level `label_name` or `label_id`. Generic saves force `label_id = NULL`.
 
 ---
 
@@ -342,6 +351,7 @@ Shown when at least one brand or product has suggestions but no exact match.
 The PATCH payload sent by the client:
 ```
 userId,              ← the manager's user ID (written to requirements.updated_by for audit trigger)
+type, is_generic,    ← original selected type + generic flag
 label_name, label_id, category_name, expiry_date, qty_required, remarks,
 products[],          ← array of { product_name, product_id, notes }
 bijnis_buyer_id,     ← from the matched product's fuzzy result (null if "as typed" or no product match)
@@ -360,6 +370,8 @@ model_used
 | 2 | No valid product match, but `label_id` is set **AND** `supply_tl_id` is a valid number | `assigned_to_user_id = supply_tl_id` (as BIGINT) |
 | 3 | Neither product nor label matched, but `category_name` has a row in `category_buyer_defaults` | `assigned_to_user_id = category_buyer_defaults.user_id` |
 | 4 | None of the above | `assigned_to_user_id = NULL` |
+
+**Generic NEW_VARIETY exception:** product and label assignment paths are skipped. Assignment uses only `category_buyer_defaults`; if the category has no mapping, the requirement remains unassigned.
 
 When an assignment is resolved, `assigned_date` is also set to `NOW()`.
 `bijnis_buyer_id` and `supply_tl_id` are validated with `!isNaN(Number(id))` before casting to BIGINT, so non-numeric values from dirty catalog data are safely ignored.
@@ -380,6 +392,8 @@ The user-selected type is **overridden** based on catalog match results:
 | Any product in `products[]` has a non-null `product_id` | `RESTOCK` |
 | No product match, but `label_id` is set | `NEW_VARIETY` |
 | Neither `product_id` nor `label_id` found | `NEW_LABEL` |
+
+`is_generic = true` always preserves `NEW_VARIETY`, regardless of product or label matches.
 
 The corrected type is written to `requirements.type` in the UPDATE. The PATCH response always includes `corrected_type` in `data`. If the client detects `corrected_type !== original type`, it shows an amber info banner on the success screen (auto-dismisses after 4 s).
 
@@ -519,13 +533,13 @@ Every status change fires the `log_requirement_changes()` trigger which inserts 
 1. Client opens a **bottom-sheet** (`ReopenSheet`) asking for a **new deadline** (`expiry_date`).
 2. On confirm: `POST /api/requirements/[id]/reopen` with `{ userId, newExpiryDate }`.
 3. Server **clones** the original requirement into a new row:
-   - Copies `type`, `label_name`, `label_id`, `category_id`, `category_name`, `qty_required`, `expected_price`, `remarks`, `notes`, `attachments`
+   - Copies `type`, `label_name`, `label_id`, `is_generic`, `category_id`, `category_name`, `qty_required`, `expected_price`, `remarks`, `notes`, `attachments`
    - Sets `status = OPEN`, `comment_log = []`, `products_suggested_count = 0`
    - Sets `parent_requirement_id = original.id`
    - Sets `created_by = original.created_by`, `updated_by = null`
    - Uses the provided `newExpiryDate`
 4. Server copies `requirement_products` rows to the new requirement.
-5. Server re-runs `resolveAssignee` and `resolveType` (same logic as Step 5) on the cloned products.
+5. Server re-runs `resolveAssignee` and `resolveType` (same logic as Step 5) on the cloned products. Generic clones remain `NEW_VARIETY` and use category-default assignment only.
 6. Server writes a `STATUS_CHANGE` entry to `status_update_log` for the clone (`old_value: null, new_value: OPEN`).
 7. Server sends push notification to the newly assigned buyer.
 8. The **original requirement is untouched** — it stays in its closed state forever.

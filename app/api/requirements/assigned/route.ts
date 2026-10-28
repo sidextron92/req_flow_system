@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabaseAdmin
     .from("requirements")
     .select(`
-      id, type, status, label_name, label_id,
+      id, type, status, label_name, label_id, is_generic,
       category_id, category_name, expiry_date,
       notes, remarks, qty_required, expected_price, attachments, comment_log, created_at, updated_at,
       assigned_to_user_id, assigned_date, created_by, products_suggested_count, parent_requirement_id,

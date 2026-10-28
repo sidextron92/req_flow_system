@@ -25,6 +25,7 @@ interface Requirement {
   type: string;
   status: string;
   label_name: string | null;
+  is_generic: boolean;
   category_name: string | null;
   expiry_date: string | null;
   notes: string | null;
@@ -239,6 +240,11 @@ function RequirementCard({
             Re-Opened
           </span>
         )}
+        {req.is_generic && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+            Generic
+          </span>
+        )}
       </div>
 
       {req.status !== "DRAFT" && (req.assignee?.name || req.status === "OPEN") && (
@@ -334,6 +340,11 @@ function AssignedRequirementCard({
         {req.parent_requirement_id && (
           <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
             Re-Opened
+          </span>
+        )}
+        {req.is_generic && (
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+            Generic
           </span>
         )}
       </div>
