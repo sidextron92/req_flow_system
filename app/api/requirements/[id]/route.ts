@@ -125,7 +125,7 @@ interface PatchBody {
   is_generic?: boolean;
   category_name?: string | null;
   expiry_date?: string | null;
-  qty_required?: string | null;
+  qty_required?: string | number | null;
   expected_price?: number | null;
   remarks?: string | null;
   products?: Product[];
@@ -133,6 +133,17 @@ interface PatchBody {
   supply_tl_id?: string | null;     // from fuzzy-match brand result
   extracted_data?: Record<string, unknown> | null;  // full AI JSON to save (optional for manual RESTOCK)
   model_used?: string | null;
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeQuantity(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
 }
 
 // ── Requirement type correction rule ──────────────────────────
@@ -241,15 +252,16 @@ export async function PATCH(
   const effectiveLabelName = label_name !== undefined ? label_name : existing.label_name;
   const effectiveCategoryName = category_name !== undefined ? category_name : existing.category_name;
   const effectiveExpiryDate = expiry_date !== undefined ? expiry_date : existing.expiry_date;
-  const effectiveQtyRequired = qty_required !== undefined ? qty_required : existing.qty_required;
+  const normalizedQtyRequired = normalizeQuantity(qty_required);
+  const effectiveQtyRequired = normalizedQtyRequired !== undefined ? normalizedQtyRequired : existing.qty_required;
   const effectiveExpectedPrice = expected_price !== undefined ? expected_price : existing.expected_price;
 
   if (requestedType !== "RESTOCK") {
     const missingFields: string[] = [];
-    if (!isGeneric && !effectiveLabelName?.trim()) missingFields.push("label_name");
-    if (!effectiveCategoryName?.trim()) missingFields.push("category_name");
+    if (!isGeneric && !hasText(effectiveLabelName)) missingFields.push("label_name");
+    if (!hasText(effectiveCategoryName)) missingFields.push("category_name");
     if (!effectiveExpiryDate) missingFields.push("expiry_date");
-    if (!effectiveQtyRequired?.trim()) missingFields.push("qty_required");
+    if (!hasText(effectiveQtyRequired)) missingFields.push("qty_required");
     if (effectiveExpectedPrice == null || !Number.isFinite(Number(effectiveExpectedPrice)) || Number(effectiveExpectedPrice) <= 0) {
       missingFields.push("expected_price");
     }
@@ -278,7 +290,7 @@ export async function PATCH(
   if (label_id      !== undefined || isGeneric) updatePayload.label_id = isGeneric ? null : (label_id || null);
   if (category_name !== undefined) updatePayload.category_name = category_name || null;
   if (expiry_date   !== undefined) updatePayload.expiry_date   = expiry_date   || null;
-  if (qty_required   !== undefined) updatePayload.qty_required   = qty_required   || null;
+  if (normalizedQtyRequired !== undefined) updatePayload.qty_required = normalizedQtyRequired;
   if (expected_price !== undefined) updatePayload.expected_price = expected_price ?? null;
   if (remarks        !== undefined) updatePayload.remarks        = remarks        || null;
 
