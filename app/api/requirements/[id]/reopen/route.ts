@@ -59,12 +59,22 @@ async function resolveAssignee(
   }
 
   const hasProductId = products?.some((p) => p.product_id);
-  if (hasProductId && bijnis_buyer_id && !Number.isNaN(Number(bijnis_buyer_id))) {
-    return Number(bijnis_buyer_id);
+  const productBuyerId = hasProductId ? Number(bijnis_buyer_id) : NaN;
+  const supplyTlId = label_id ? Number(supply_tl_id) : NaN;
+  const catalogCandidates = [productBuyerId, supplyTlId].filter(
+    (id) => Number.isSafeInteger(id) && id > 0
+  );
+
+  if (catalogCandidates.length > 0) {
+    const { data: users } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .in("id", catalogCandidates);
+    const existingUserIds = new Set((users ?? []).map((user) => Number(user.id)));
+    const assigneeId = catalogCandidates.find((id) => existingUserIds.has(id));
+    if (assigneeId !== undefined) return assigneeId;
   }
-  if (label_id && supply_tl_id && !Number.isNaN(Number(supply_tl_id))) {
-    return Number(supply_tl_id);
-  }
+
   // Category fallback: check category_buyer_defaults
   if (category_name) {
     const { data } = await supabaseAdmin
